@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.venv/
+*.egg
+
+# uv
+.python-version
+
+# SQLite
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Environment
+.env
+!.env.example
+
+# IDE
+.cursor/
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Node
+node_modules/
+npm-debug.log*
+
+# Frontend build
+frontend/dist/
+
+# Tauri
+tauri/src-tauri/target/
+
+# Test / Coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Alembic
+backend/data/
+
+# Ruff
+.ruff_cache/
