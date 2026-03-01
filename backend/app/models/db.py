@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import ForeignKey, Text, event, text
 from sqlalchemy.ext.asyncio import (
@@ -44,8 +44,11 @@ class Session(Base):
 
     id: Mapped[str] = mapped_column(primary_key=True, default=lambda: str(uuid.uuid4()))
     title: Mapped[str | None] = mapped_column(Text, default=None)
-    created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime] = mapped_column(
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
 
     user_messages: Mapped[list["UserMessage"]] = relationship(back_populates="session")
     agent_messages: Mapped[list["AgentMessage"]] = relationship(back_populates="session")
@@ -60,7 +63,7 @@ class UserMessage(Base):
     role: Mapped[str] = mapped_column(Text)  # user | reader
     content: Mapped[str] = mapped_column(Text)
     mode: Mapped[str | None] = mapped_column(Text, default=None)  # solo | team
-    created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(UTC))
 
     session: Mapped["Session"] = relationship(back_populates="user_messages")
 
@@ -75,7 +78,7 @@ class AgentMessage(Base):
     role_preset: Mapped[str] = mapped_column(Text)
     content: Mapped[str] = mapped_column(Text, default="")
     status: Mapped[str] = mapped_column(Text, default="working")
-    created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(UTC))
 
     session: Mapped["Session"] = relationship(back_populates="agent_messages")
 

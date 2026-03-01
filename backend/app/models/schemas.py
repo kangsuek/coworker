@@ -5,12 +5,14 @@ from pydantic import BaseModel
 
 # --- 요청 모델 ---
 
+
 class ChatRequest(BaseModel):
     session_id: str | None = None
     message: str
 
 
 # --- 응답 모델 ---
+
 
 class ChatResponse(BaseModel):
     run_id: str
@@ -25,8 +27,15 @@ class AgentInfo(BaseModel):
 
 class RunStatus(BaseModel):
     status: Literal[
-        "queued", "thinking", "solo", "delegating",
-        "working", "integrating", "done", "error", "cancelled",
+        "queued",
+        "thinking",
+        "solo",
+        "delegating",
+        "working",
+        "integrating",
+        "done",
+        "error",
+        "cancelled",
     ]
     progress: str | None = None
     response: str | None = None
@@ -49,6 +58,7 @@ class AgentMessagesResponse(BaseModel):
 
 
 # --- 세션 모델 ---
+
 
 class SessionOut(BaseModel):
     id: str
@@ -74,6 +84,7 @@ class SessionDetail(BaseModel):
 
 
 # --- CLI 분류 결과 (F-001) ---
+
 
 class AgentPlan(BaseModel):
     role: Literal["Researcher", "Coder", "Reviewer", "Writer", "Planner"]
