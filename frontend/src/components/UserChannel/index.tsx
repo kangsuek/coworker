@@ -2,34 +2,44 @@ import { useEffect, useRef, useState } from 'react'
 
 import { useRunPolling } from '../../hooks/useRunPolling'
 import { api } from '../../lib/api'
-import type { Session, UserMessage } from '../../types/api'
+import type { AgentMessage, Session, UserMessage } from '../../types/api'
 import MessageBubble from './MessageBubble'
 import StatusBadge from './StatusBadge'
 
 interface Props {
   currentSession: Session | null
   messages: UserMessage[]
+  runId: string | null
   onMessageAdded: (msg: UserMessage) => void
   onSessionCreated: (sessionId: string) => void
   onModeChange: (mode: 'solo' | 'team' | null) => void
+  onRunChange: (runId: string | null) => void
+  agentMessages?: AgentMessage[]
 }
 
 export default function UserChannel({
   currentSession,
   messages,
+  runId,
   onMessageAdded,
   onSessionCreated,
   onModeChange,
+  onRunChange,
+  agentMessages,
 }: Props) {
   const [input, setInput] = useState('')
-  const [runId, setRunId] = useState<string | null>(null)
-  const [sending, setSending] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const onMessageAddedRef = useRef(onMessageAdded)
   const onModeChangeRef = useRef(onModeChange)
+  const onRunChangeRef = useRef(onRunChange)
+  const agentMessagesRef = useRef(agentMessages)
+
   useEffect(() => {
     onMessageAddedRef.current = onMessageAdded
     onModeChangeRef.current = onModeChange
+    onRunChangeRef.current = onRunChange
+    agentMessagesRef.current = agentMessages
   })
 
   const runStatus = useRunPolling(runId, {
@@ -42,8 +52,7 @@ export default function UserChannel({
         created_at: new Date().toISOString(),
       })
       onModeChangeRef.current(mode)
-      setRunId(null)
-      setSending(false)
+      onRunChangeRef.current(null)
     },
     onError: (errorResponse) => {
       onMessageAddedRef.current({
@@ -53,12 +62,22 @@ export default function UserChannel({
         mode: null,
         created_at: new Date().toISOString(),
       })
-      setRunId(null)
-      setSending(false)
+      onRunChangeRef.current(null)
     },
     onCancelled: () => {
-      setRunId(null)
-      setSending(false)
+      const msgs = agentMessagesRef.current ?? []
+      const mode = runStatus.mode
+      if (mode === 'team' && msgs.length > 0) {
+        const doneCount = msgs.filter((m) => m.status === 'done').length
+        onMessageAddedRef.current({
+          id: crypto.randomUUID(),
+          role: 'reader',
+          content: `${msgs.length}개 중 ${doneCount}개 Agent 완료 후 취소되었습니다.`,
+          mode: 'team',
+          created_at: new Date().toISOString(),
+        })
+      }
+      onRunChangeRef.current(null)
     },
   })
 
@@ -68,11 +87,12 @@ export default function UserChannel({
   }, [messages, runId])
 
   const handleSend = async () => {
-    if (!input.trim() || sending) return
+    const isRunning = submitting || runId !== null
+    if (!input.trim() || isRunning) return
 
     const text = input.trim()
     setInput('')
-    setSending(true)
+    setSubmitting(true)
 
     onMessageAdded({
       id: crypto.randomUUID(),
@@ -87,7 +107,7 @@ export default function UserChannel({
       if (!currentSession) {
         onSessionCreated(resp.session_id)
       }
-      setRunId(resp.run_id)
+      onRunChange(resp.run_id)
     } catch {
       onMessageAdded({
         id: crypto.randomUUID(),
@@ -96,11 +116,21 @@ export default function UserChannel({
         mode: null,
         created_at: new Date().toISOString(),
       })
-      setSending(false)
+    } finally {
+      setSubmitting(false)
     }
   }
 
-  const isRunning = sending && runId !== null
+  const handleCancel = async () => {
+    if (!runId) return
+    try {
+      await api.cancelRun(runId)
+    } catch {
+      // 에러 무시 - 폴링이 cancelled 상태를 감지해 처리
+    }
+  }
+
+  const isRunning = submitting || runId !== null
 
   return (
     <>
@@ -139,13 +169,23 @@ export default function UserChannel({
             className="flex-1 px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm disabled:bg-gray-50"
             disabled={isRunning}
           />
-          <button
-            onClick={handleSend}
-            disabled={isRunning || !input.trim()}
-            className="px-5 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 text-sm font-medium"
-          >
-            {isRunning ? '...' : '전송'}
-          </button>
+          {/* 6-5: 실행 중이면 취소 버튼, 아니면 전송 버튼 */}
+          {isRunning ? (
+            <button
+              onClick={handleCancel}
+              className="px-5 py-2.5 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors text-sm font-medium"
+            >
+              취소 ✕
+            </button>
+          ) : (
+            <button
+              onClick={handleSend}
+              disabled={!input.trim()}
+              className="px-5 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 text-sm font-medium"
+            >
+              전송
+            </button>
+          )}
         </div>
       </div>
     </>

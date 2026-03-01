@@ -10,6 +10,7 @@ import logging
 import os
 import sqlite3
 
+from sqlalchemy import text as sql_text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.presets import coder, planner, researcher, reviewer, writer
@@ -86,6 +87,16 @@ class ReaderAgent:
                 await self._team_execute(result, user_message, session_id, run_id)
         except Exception as e:
             logger.exception("process_message 실패: run_id=%s", run_id)
+
+            # 취소된 run은 에러 상태로 덮어쓰지 않음 (cancel_run 엔드포인트와의 race condition 방어)
+            status_row = await self.db.execute(
+                sql_text("SELECT status FROM runs WHERE id = :run_id"), {"run_id": run_id}
+            )
+            row = status_row.fetchone()
+            if row and row[0] == "cancelled":
+                logger.info("process_message 예외 발생했으나 이미 취소됨: run_id=%s", run_id)
+                return
+
             error_msg = str(e)
 
             if "Claude CLI error" in error_msg:

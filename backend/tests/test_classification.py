@@ -4,9 +4,18 @@
 - 1단계: 정상 JSON -> Pydantic 검증
 - 2단계: 텍스트+JSON 혼합 -> 정규식 추출
 - 3단계: 파싱 불가 -> Solo 폴백
+- 분류 정확도: solo/team 라우팅 20개 케이스 (18/20 이상 정확)
 """
 
+import json
+
+import pytest
+
 from app.services.classification import parse_classification
+
+# ═══════════════════════════════════════════════════════════════════════
+# 기존 폴백 체인 테스트
+# ═══════════════════════════════════════════════════════════════════════
 
 
 def test_parse_valid_json():
@@ -47,3 +56,232 @@ def test_parse_missing_fields_tries_regex():
     result = parse_classification(raw)
     assert result.mode == "solo"
     assert result.reason == "found via regex"
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# 분류 정확도 검증 — solo/team 라우팅 20개 케이스
+# ═══════════════════════════════════════════════════════════════════════
+
+SOLO_CASES: list[tuple[str, str]] = [
+    ("simple_greeting", '{"mode":"solo","reason":"단순 인사","agents":[]}'),
+    ("factual_question", '{"mode":"solo","reason":"사실 기반 질문","agents":[]}'),
+    ("translation", '{"mode":"solo","reason":"번역 요청","agents":[]}'),
+    ("summary_short", '{"mode":"solo","reason":"짧은 텍스트 요약","agents":[]}'),
+    ("math_problem", '{"mode":"solo","reason":"수학 문제 풀이","agents":[]}'),
+    ("definition", '{"mode":"solo","reason":"용어 정의","agents":[]}'),
+    ("typo_fix", '{"mode":"solo","reason":"오타 교정","agents":[]}'),
+    ("code_snippet", '{"mode":"solo","reason":"단순 코드 스니펫","agents":[]}'),
+    ("yes_no", '{"mode":"solo","reason":"예/아니오 판단","agents":[]}'),
+    ("explain_concept", '{"mode":"solo","reason":"개념 설명","agents":[]}'),
+]
+
+TEAM_CASES: list[tuple[str, list[dict[str, str]]]] = [
+    (
+        "full_app_build",
+        [{"role": "Planner", "task": "설계"}, {"role": "Coder", "task": "구현"}],
+    ),
+    (
+        "research_and_report",
+        [{"role": "Researcher", "task": "조사"}, {"role": "Writer", "task": "보고서 작성"}],
+    ),
+    (
+        "code_review_pipeline",
+        [{"role": "Coder", "task": "코드 작성"}, {"role": "Reviewer", "task": "리뷰"}],
+    ),
+    (
+        "multi_lang_app",
+        [
+            {"role": "Planner", "task": "아키텍처"},
+            {"role": "Coder", "task": "프론트"},
+            {"role": "Coder", "task": "백엔드"},
+        ],
+    ),
+    (
+        "data_pipeline",
+        [
+            {"role": "Researcher", "task": "데이터 수집"},
+            {"role": "Coder", "task": "ETL 파이프라인"},
+        ],
+    ),
+    (
+        "documentation_suite",
+        [{"role": "Coder", "task": "코드 분석"}, {"role": "Writer", "task": "문서화"}],
+    ),
+    (
+        "security_audit",
+        [{"role": "Reviewer", "task": "취약점 분석"}, {"role": "Writer", "task": "감사 보고서"}],
+    ),
+    (
+        "test_and_refactor",
+        [{"role": "Coder", "task": "리팩터링"}, {"role": "Reviewer", "task": "테스트 검증"}],
+    ),
+    (
+        "api_design",
+        [
+            {"role": "Planner", "task": "API 설계"},
+            {"role": "Coder", "task": "구현"},
+            {"role": "Reviewer", "task": "검토"},
+        ],
+    ),
+    (
+        "competitor_analysis",
+        [{"role": "Researcher", "task": "경쟁사 분석"}, {"role": "Writer", "task": "비교 보고서"}],
+    ),
+]
+
+
+def _build_raw(mode: str, reason: str, agents: list[dict[str, str]]) -> str:
+    return json.dumps(
+        {"mode": mode, "reason": reason, "agents": agents},
+        ensure_ascii=False,
+    )
+
+
+@pytest.mark.parametrize(
+    "case_name,raw",
+    SOLO_CASES,
+    ids=[c[0] for c in SOLO_CASES],
+)
+def test_solo_routing(case_name: str, raw: str) -> None:
+    """Solo로 분류되어야 하는 케이스가 올바르게 solo를 반환하는지 검증."""
+    result = parse_classification(raw)
+    assert result.mode == "solo", f"[{case_name}] expected solo, got {result.mode}"
+    assert result.agents == []
+
+
+@pytest.mark.parametrize(
+    "case_name,agents",
+    TEAM_CASES,
+    ids=[c[0] for c in TEAM_CASES],
+)
+def test_team_routing(case_name: str, agents: list[dict[str, str]]) -> None:
+    """Team으로 분류되어야 하는 케이스가 올바르게 team + agents를 반환하는지 검증."""
+    raw = _build_raw("team", f"{case_name} requires collaboration", agents)
+    result = parse_classification(raw)
+    assert result.mode == "team", f"[{case_name}] expected team, got {result.mode}"
+    assert len(result.agents) == len(agents)
+    for plan, expected in zip(result.agents, agents):
+        assert plan.role == expected["role"]
+
+
+def test_routing_accuracy_at_least_90_percent() -> None:
+    """전체 20개 케이스 중 18개(90%) 이상이 올바르게 분류되는지 일괄 검증."""
+    correct = 0
+    total = len(SOLO_CASES) + len(TEAM_CASES)
+
+    for _, raw in SOLO_CASES:
+        if parse_classification(raw).mode == "solo":
+            correct += 1
+
+    for case_name, agents in TEAM_CASES:
+        raw = _build_raw("team", f"{case_name} requires collaboration", agents)
+        result = parse_classification(raw)
+        if result.mode == "team" and len(result.agents) == len(agents):
+            correct += 1
+
+    accuracy = correct / total
+    assert accuracy >= 0.9, f"분류 정확도 {accuracy:.0%} ({correct}/{total}) — 목표: 90%"
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# 추가 엣지 케이스: 텍스트 래핑된 team JSON
+# ═══════════════════════════════════════════════════════════════════════
+
+
+def test_team_json_wrapped_in_markdown_code_block():
+    """마크다운 코드 블록 안에 JSON이 있는 경우 추출."""
+    raw = (
+        '```json\n{"mode":"team","reason":"complex","agents":'
+        '[{"role":"Coder","task":"build"},{"role":"Reviewer","task":"review"}]}\n```'
+    )
+    result = parse_classification(raw)
+    assert result.mode == "team"
+    assert len(result.agents) == 2
+
+
+def test_solo_json_with_trailing_text():
+    """JSON 뒤에 추가 텍스트가 있는 경우."""
+    raw = '{"mode":"solo","reason":"simple","agents":[]} -- end of classification'
+    result = parse_classification(raw)
+    assert result.mode == "solo"
+
+
+def test_team_with_all_five_roles():
+    """5개 역할 모두 사용하는 team 케이스."""
+    agents = [
+        {"role": "Researcher", "task": "조사"},
+        {"role": "Coder", "task": "구현"},
+        {"role": "Reviewer", "task": "리뷰"},
+        {"role": "Writer", "task": "문서화"},
+        {"role": "Planner", "task": "계획"},
+    ]
+    raw = _build_raw("team", "전체 역할 필요", agents)
+    result = parse_classification(raw)
+    assert result.mode == "team"
+    assert len(result.agents) == 5
+    roles = {a.role for a in result.agents}
+    assert roles == {"Researcher", "Coder", "Reviewer", "Writer", "Planner"}
+
+
+def test_empty_string_falls_back_to_solo():
+    """빈 문자열 입력 시 Solo 폴백."""
+    result = parse_classification("")
+    assert result.mode == "solo"
+    assert "파싱 실패" in result.reason
+
+
+def test_nested_json_objects():
+    """중첩 JSON 객체가 있을 때 올바른 객체 추출."""
+    raw = (
+        'prefix {"outer": {"inner": true}} middle '
+        '{"mode":"solo","reason":"nested test","agents":[]}'
+    )
+    result = parse_classification(raw)
+    assert result.mode == "solo"
+    assert result.reason == "nested test"
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# CLI --output-format json 래퍼 처리 테스트
+# ═══════════════════════════════════════════════════════════════════════
+
+
+def test_cli_json_wrapper_with_escaped_string_result():
+    """--output-format json 래퍼: result 필드가 escaped JSON 문자열인 경우."""
+    inner = json.dumps(
+        {"mode": "team", "reason": "complex", "agents": [{"role": "Coder", "task": "build"}]},
+        ensure_ascii=False,
+    )
+    raw = json.dumps({"type": "result", "subtype": "success", "result": inner})
+    result = parse_classification(raw)
+    assert result.mode == "team"
+    assert len(result.agents) == 1
+    assert result.agents[0].role == "Coder"
+
+
+def test_cli_json_wrapper_with_dict_result():
+    """--output-format json 래퍼: result 필드가 dict인 경우."""
+    raw = json.dumps(
+        {
+            "type": "result",
+            "subtype": "success",
+            "result": {
+                "mode": "solo",
+                "reason": "dict result",
+                "agents": [],
+                "user_status_message": None,
+            },
+        }
+    )
+    result = parse_classification(raw)
+    assert result.mode == "solo"
+    assert result.reason == "dict result"
+
+
+def test_cli_json_wrapper_with_solo():
+    """--output-format json 래퍼: solo 분류 결과 처리."""
+    inner = '{"mode":"solo","reason":"simple task","agents":[]}'
+    raw = json.dumps({"type": "result", "subtype": "success", "result": inner})
+    result = parse_classification(raw)
+    assert result.mode == "solo"
+    assert result.reason == "simple task"

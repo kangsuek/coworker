@@ -59,7 +59,7 @@ backend/data/
 logs/
 
 # Playwright screenshots & test artifacts
-.playwright/
+.playwright-mcp/
 
 # MCP config (contains secrets)
 .mcp.json
