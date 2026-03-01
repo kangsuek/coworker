@@ -59,3 +59,66 @@ async def test_get_run_status_not_found(client):
     """GET /api/runs/invalid → 404."""
     response = await client.get("/api/runs/nonexistent-run-id")
     assert response.status_code == 404
+
+
+# --- Task 5-6: GET /api/runs/{run_id}/agent-messages ---
+
+
+@pytest.mark.asyncio
+async def test_get_agent_messages(client, db):
+    """agent_messages 조회 반환."""
+    from app.services.session_service import (
+        create_agent_message,
+        create_run,
+        create_session,
+        create_user_message,
+    )
+
+    sess = await create_session(db)
+    user_msg = await create_user_message(db, sess.id, "user", "작업")
+    run = await create_run(db, sess.id, user_msg.id)
+    await create_agent_message(db, sess.id, run.id, "Researcher-A", "Researcher")
+
+    resp = await client.get(f"/api/runs/{run.id}/agent-messages")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "messages" in data
+    assert len(data["messages"]) == 1
+    assert data["messages"][0]["sender"] == "Researcher-A"
+
+
+@pytest.mark.asyncio
+async def test_get_agent_messages_empty(client, db):
+    """메시지 없음 → 빈 배열."""
+    from app.services.session_service import create_run, create_session, create_user_message
+
+    sess = await create_session(db)
+    user_msg = await create_user_message(db, sess.id, "user", "작업")
+    run = await create_run(db, sess.id, user_msg.id)
+
+    resp = await client.get(f"/api/runs/{run.id}/agent-messages")
+    assert resp.status_code == 200
+    assert resp.json()["messages"] == []
+
+
+@pytest.mark.asyncio
+async def test_get_agent_messages_includes_working(client, db):
+    """working 상태 중간 출력 포함 확인."""
+    from app.services.session_service import (
+        create_agent_message,
+        create_run,
+        create_session,
+        create_user_message,
+        update_agent_message_content,
+    )
+
+    sess = await create_session(db)
+    user_msg = await create_user_message(db, sess.id, "user", "작업")
+    run = await create_run(db, sess.id, user_msg.id)
+    msg = await create_agent_message(db, sess.id, run.id, "Coder-A", "Coder")
+    await update_agent_message_content(db, msg.id, "중간 출력 내용")
+
+    resp = await client.get(f"/api/runs/{run.id}/agent-messages")
+    data = resp.json()
+    assert data["messages"][0]["content"] == "중간 출력 내용"
+    assert data["messages"][0]["status"] == "working"

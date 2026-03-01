@@ -4,19 +4,25 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agents.reader import ReaderAgent
 from app.models.db import Run, async_session, get_db
 from app.models.schemas import (
+    AgentMessageOut,
     AgentMessagesResponse,
     ChatRequest,
     ChatResponse,
     RunStatus,
 )
+from app.services.cli_service import cancel_current
 from app.services.session_service import (
     create_run,
     create_session,
     create_user_message,
+    get_agent_messages,
     get_session,
+    update_run_status,
 )
 
 router = APIRouter(tags=["chat"])
+
+_CANCELLABLE_STATUSES = {"queued", "thinking", "solo", "delegating", "working", "integrating"}
 
 
 async def _run_reader_agent(session_id: str, user_message: str, run_id: str) -> None:
@@ -54,14 +60,35 @@ async def get_run_status(run_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/runs/{run_id}/agent-messages", response_model=AgentMessagesResponse)
-async def get_agent_messages(run_id: str, db: AsyncSession = Depends(get_db)):
+async def get_agent_messages_endpoint(run_id: str, db: AsyncSession = Depends(get_db)):
     """Agent Channel 중간 출력 폴링 엔드포인트."""
-    # TODO: Sprint 5에서 구현
-    raise NotImplementedError
+    messages = await get_agent_messages(db, run_id)
+    return AgentMessagesResponse(
+        messages=[
+            AgentMessageOut(
+                id=m.id,
+                sender=m.sender,
+                role_preset=m.role_preset,
+                content=m.content,
+                status=m.status,
+                created_at=m.created_at,
+            )
+            for m in messages
+        ],
+        has_more=False,
+    )
 
 
 @router.post("/runs/{run_id}/cancel")
 async def cancel_run(run_id: str, db: AsyncSession = Depends(get_db)):
-    """실행 취소."""
-    # TODO: Sprint 5에서 구현
-    raise NotImplementedError
+    """실행 취소. 취소 가능한 상태가 아니면 무시."""
+    run = await db.get(Run, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    if run.status in _CANCELLABLE_STATUSES:
+        await cancel_current()
+        await update_run_status(db, run_id, "cancelled")
+
+    final_status = "cancelled" if run.status in _CANCELLABLE_STATUSES else run.status
+    return {"run_id": run_id, "status": final_status}

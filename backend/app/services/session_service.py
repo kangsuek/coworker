@@ -97,3 +97,63 @@ async def update_run_status(
     await db.commit()
     await db.refresh(run)
     return run
+
+
+async def create_agent_message(
+    db: AsyncSession,
+    session_id: str,
+    run_id: str,
+    sender: str,
+    role_preset: str,
+) -> models.AgentMessage:
+    """AgentMessage 레코드 생성 (초기 status='working')."""
+    msg = models.AgentMessage(
+        session_id=session_id,
+        run_id=run_id,
+        sender=sender,
+        role_preset=role_preset,
+        content="",
+        status="working",
+    )
+    db.add(msg)
+    await db.commit()
+    await db.refresh(msg)
+    return msg
+
+
+async def update_agent_message_content(
+    db: AsyncSession, msg_id: str, content: str
+) -> models.AgentMessage | None:
+    """AgentMessage 내용 업데이트 (중간 출력 누적)."""
+    msg = await db.get(models.AgentMessage, msg_id)
+    if msg is None:
+        return None
+    msg.content = content
+    await db.commit()
+    await db.refresh(msg)
+    return msg
+
+
+async def update_agent_message_status(
+    db: AsyncSession, msg_id: str, status: str
+) -> models.AgentMessage | None:
+    """AgentMessage 상태 업데이트."""
+    msg = await db.get(models.AgentMessage, msg_id)
+    if msg is None:
+        return None
+    msg.status = status
+    await db.commit()
+    await db.refresh(msg)
+    return msg
+
+
+async def get_agent_messages(
+    db: AsyncSession, run_id: str
+) -> list[models.AgentMessage]:
+    """run_id에 해당하는 agent_messages 목록 (생성순)."""
+    result = await db.execute(
+        select(models.AgentMessage)
+        .where(models.AgentMessage.run_id == run_id)
+        .order_by(models.AgentMessage.created_at)
+    )
+    return list(result.scalars().all())

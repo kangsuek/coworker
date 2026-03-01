@@ -9,12 +9,16 @@
 import pytest
 
 from app.services.session_service import (
+    create_agent_message,
     create_run,
     create_session,
     create_user_message,
+    get_agent_messages,
     get_session,
     get_session_with_messages,
     list_sessions,
+    update_agent_message_content,
+    update_agent_message_status,
     update_run_status,
 )
 
@@ -138,3 +142,63 @@ async def test_auto_title_no_overwrite(db):
     await create_user_message(db, sess.id, "user", "새 메시지")
     updated = await get_session(db, sess.id)
     assert updated.title == "기존 제목"
+
+
+# --- Task 5-5: Agent Channel DB 기록 ---
+
+
+@pytest.mark.asyncio
+async def test_create_agent_message(db):
+    """AgentMessage 레코드 생성 확인."""
+    sess = await create_session(db)
+    user_msg = await create_user_message(db, sess.id, "user", "작업")
+    run = await create_run(db, sess.id, user_msg.id)
+
+    msg = await create_agent_message(db, sess.id, run.id, "Researcher-A", "Researcher")
+    assert msg.id is not None
+    assert msg.session_id == sess.id
+    assert msg.run_id == run.id
+    assert msg.sender == "Researcher-A"
+    assert msg.role_preset == "Researcher"
+    assert msg.status == "working"
+
+
+@pytest.mark.asyncio
+async def test_update_agent_message_content(db):
+    """중간 출력 누적 업데이트."""
+    sess = await create_session(db)
+    user_msg = await create_user_message(db, sess.id, "user", "작업")
+    run = await create_run(db, sess.id, user_msg.id)
+    msg = await create_agent_message(db, sess.id, run.id, "Coder-A", "Coder")
+
+    updated = await update_agent_message_content(db, msg.id, "첫 번째 줄\n두 번째 줄\n")
+    assert updated is not None
+    assert "첫 번째 줄" in updated.content
+    assert "두 번째 줄" in updated.content
+
+
+@pytest.mark.asyncio
+async def test_update_agent_message_status(db):
+    """상태 변경 확인."""
+    sess = await create_session(db)
+    user_msg = await create_user_message(db, sess.id, "user", "작업")
+    run = await create_run(db, sess.id, user_msg.id)
+    msg = await create_agent_message(db, sess.id, run.id, "Writer-A", "Writer")
+
+    updated = await update_agent_message_status(db, msg.id, "done")
+    assert updated is not None
+    assert updated.status == "done"
+
+
+@pytest.mark.asyncio
+async def test_get_agent_messages(db):
+    """run_id로 agent_messages 목록 조회."""
+    sess = await create_session(db)
+    user_msg = await create_user_message(db, sess.id, "user", "작업")
+    run = await create_run(db, sess.id, user_msg.id)
+
+    await create_agent_message(db, sess.id, run.id, "Researcher-A", "Researcher")
+    await create_agent_message(db, sess.id, run.id, "Coder-A", "Coder")
+
+    messages = await get_agent_messages(db, run.id)
+    assert len(messages) == 2
