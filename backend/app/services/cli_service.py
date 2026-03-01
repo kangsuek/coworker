@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import signal
 import subprocess
@@ -17,6 +18,8 @@ import threading
 from collections.abc import Callable
 
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 _current_proc: subprocess.Popen | None = None
 _cli_lock = asyncio.Lock()
@@ -47,6 +50,7 @@ def _call_claude_sync(
     cmd = [settings.claude_cli_path, "-p", user_message, "--system-prompt", system_prompt]
     if output_json:
         cmd.extend(["--output-format", "json"])
+    logger.debug("Claude CLI 시작: output_json=%s, timeout=%ds", output_json, timeout)
 
     # CLAUDECODE 환경변수 제거: Claude Code 세션 내에서 중첩 실행 방지
     child_env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
@@ -85,14 +89,17 @@ def _call_claude_sync(
         except ProcessLookupError:
             pass
         proc.wait()
+        logger.error("Claude CLI 타임아웃: pid=%d, timeout=%ds", proc.pid, timeout)
         raise RuntimeError(f"CLI timeout after {timeout}s")
     finally:
         _current_proc = None
 
     if proc.returncode != 0:
         # stderr는 stdout에 합쳐졌으므로 이미 lines에 포함됨
+        logger.error("Claude CLI 비정상 종료: rc=%d, output_lines=%d", proc.returncode, len(lines))
         raise RuntimeError(f"Claude CLI error (rc={proc.returncode}): {''.join(lines)}")
 
+    logger.info("Claude CLI 완료: rc=%d, output_lines=%d", proc.returncode, len(lines))
     return "".join(lines)
 
 
@@ -119,6 +126,7 @@ async def cancel_current():
     global _is_cancelled
     _is_cancelled = True  # Popen 직전 취소 요청 대비 플래그 설정
     if _current_proc and _current_proc.poll() is None:
+        logger.info("Claude CLI 취소 요청: pid=%d", _current_proc.pid)
         try:
             os.killpg(os.getpgid(_current_proc.pid), signal.SIGTERM)
         except ProcessLookupError:

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { api } from '../lib/api'
 import type { Session, UserMessage } from '../types/api'
@@ -18,6 +18,7 @@ export function useSession(): UseSessionResult {
   const [sessions, setSessions] = useState<Session[]>([])
   const [currentSession, setCurrentSession] = useState<Session | null>(null)
   const [messages, setMessages] = useState<UserMessage[]>([])
+  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     api.getSessions().then(setSessions).catch(() => {})
@@ -39,7 +40,17 @@ export function useSession(): UseSessionResult {
   const addMessage = useCallback((msg: UserMessage) => {
     setMessages((prev) => [...prev, msg])
     if (msg.role === 'reader') {
-      api.getSessions().then(setSessions).catch(() => {})
+      // 짧은 시간 내 연속 호출 시 목록 깜빡임 방지: 300ms 디바운스
+      if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current)
+      refreshTimerRef.current = setTimeout(() => {
+        api.getSessions().then((list) => {
+          setSessions(list)
+          setCurrentSession((prev) => {
+            if (!prev) return prev
+            return list.find((s) => s.id === prev.id) ?? prev
+          })
+        }).catch(() => {})
+      }, 300)
     }
   }, [])
 

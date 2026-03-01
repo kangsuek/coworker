@@ -8,15 +8,30 @@ import type {
 } from '../types/api'
 
 const API_BASE = '/api'
+const MAX_RETRIES = 1
+const RETRY_DELAY_MS = 1000
+
+// 네트워크 단절 시 1회 재시도 (HTTP 에러는 재시도 불필요)
+async function fetchWithRetry(input: string, init?: RequestInit): Promise<Response> {
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      return await fetch(input, init)
+    } catch (err) {
+      if (attempt === MAX_RETRIES) throw err
+      await new Promise<void>((resolve) => setTimeout(resolve, RETRY_DELAY_MS))
+    }
+  }
+  throw new Error('Unreachable')
+}
 
 async function get<T>(path: string): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`)
+  const res = await fetchWithRetry(`${API_BASE}${path}`)
   if (!res.ok) throw new Error(`GET ${path} failed: ${res.status}`)
   return res.json()
 }
 
 async function post<T>(path: string, body?: unknown): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await fetchWithRetry(`${API_BASE}${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: body ? JSON.stringify(body) : undefined,

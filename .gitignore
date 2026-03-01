@@ -33,9 +33,13 @@ build/
 # Node
 node_modules/
 npm-debug.log*
+*.tsbuildinfo
 
 # Frontend build
 frontend/dist/
+
+# Vite cache
+.vite/
 
 # Tauri
 tauri/src-tauri/target/
@@ -50,3 +54,9 @@ backend/data/
 
 # Ruff
 .ruff_cache/
+
+# Logs
+logs/
+
+# Playwright screenshots & test artifacts
+.playwright/

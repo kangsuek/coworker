@@ -1,12 +1,13 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 # --- 요청 모델 ---
 
 
 class ChatRequest(BaseModel):
+    model_config = ConfigDict(strict=True)
     session_id: str | None = None
     message: str
 
@@ -92,6 +93,7 @@ class AgentPlan(BaseModel):
 
 
 class ClassificationResult(BaseModel):
+    model_config = ConfigDict(strict=True)
     mode: Literal["solo", "team"]
     reason: str
     agents: list[AgentPlan] = []
