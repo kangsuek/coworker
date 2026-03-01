@@ -60,3 +60,6 @@ logs/
 
 # Playwright screenshots & test artifacts
 .playwright/
+
+# MCP config (contains secrets)
+.mcp.json
