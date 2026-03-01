@@ -69,7 +69,7 @@ def _call_claude_sync(
     if _is_cancelled:
         try:
             os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
-        except ProcessLookupError:
+        except (ProcessLookupError, OSError):
             pass
         proc.wait()
         raise RuntimeError("Cancelled before execution")
@@ -86,7 +86,7 @@ def _call_claude_sync(
     except subprocess.TimeoutExpired:
         try:
             os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
-        except ProcessLookupError:
+        except (ProcessLookupError, OSError):
             pass
         proc.wait()
         logger.error("Claude CLI 타임아웃: pid=%d, timeout=%ds", proc.pid, timeout)
@@ -129,7 +129,7 @@ async def cancel_current():
         logger.info("Claude CLI 취소 요청: pid=%d", _current_proc.pid)
         try:
             os.killpg(os.getpgid(_current_proc.pid), signal.SIGTERM)
-        except ProcessLookupError:
+        except (ProcessLookupError, OSError):
             pass
 
 

@@ -199,3 +199,98 @@ async def test_team_execute_records_agent_messages(db):
     # 각 Agent 완료 시 status "done" 업데이트
     done_calls = [c for c in mock_update_status.call_args_list if "done" in c.args]
     assert len(done_calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_team_execute_sub_agent_exception_sets_error_status(db):
+    """Sub-Agent 실행 중 Exception → agent_message status 'error' + 예외 전파."""
+    session = await create_session(db)
+    user_msg = await create_user_message(db, session.id, "user", "작업")
+    run = await create_run(db, session.id, user_msg.id)
+
+    classification = ClassificationResult(
+        mode="team",
+        reason="복잡함",
+        agents=[AgentPlan(role="Researcher", task="리서치")],
+        user_status_message=None,
+    )
+
+    agent = ReaderAgent(db)
+
+    with (
+        patch("app.agents.reader.update_run_status", new_callable=AsyncMock),
+        patch("app.agents.reader.create_user_message", new_callable=AsyncMock),
+        patch.object(agent, "_assemble_context", new_callable=AsyncMock, return_value=None),
+        patch("app.agents.reader.create_agent_message", new_callable=AsyncMock) as mock_create_am,
+        patch(
+            "app.agents.reader.update_agent_message_status", new_callable=AsyncMock
+        ) as mock_update_status,
+        patch(
+            "app.agents.sub_agent.call_claude_streaming",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("CLI 실패"),
+        ),
+        patch("app.agents.reader.update_agent_message_content", new_callable=AsyncMock),
+    ):
+        mock_am = MagicMock()
+        mock_am.id = "test-id"
+        mock_create_am.return_value = mock_am
+
+        with pytest.raises(RuntimeError, match="CLI 실패"):
+            await agent._team_execute(classification, "작업", session.id, run.id)
+
+    error_calls = [c for c in mock_update_status.call_args_list if "error" in c.args]
+    assert len(error_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_team_execute_integrate_results_failure_propagates(db):
+    """_integrate_results CLI 실패 → 예외 전파 (done 미전환)."""
+    session = await create_session(db)
+    user_msg = await create_user_message(db, session.id, "user", "통합 실패")
+    run = await create_run(db, session.id, user_msg.id)
+
+    classification = ClassificationResult(
+        mode="team",
+        reason="복잡함",
+        agents=[AgentPlan(role="Researcher", task="리서치")],
+        user_status_message=None,
+    )
+
+    statuses: list[str] = []
+
+    async def fake_update_run(db, run_id, status, **fields):
+        statuses.append(status)
+        from app.services.session_service import update_run_status as real_update
+
+        return await real_update(db, run_id, status, **fields)
+
+    agent = ReaderAgent(db)
+
+    with (
+        patch("app.agents.reader.update_run_status", side_effect=fake_update_run),
+        patch("app.agents.reader.create_user_message", new_callable=AsyncMock),
+        patch.object(agent, "_assemble_context", new_callable=AsyncMock, return_value=None),
+        patch.object(
+            agent,
+            "_integrate_results",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("통합 CLI 실패"),
+        ),
+        patch(
+            "app.agents.sub_agent.call_claude_streaming",
+            new_callable=AsyncMock,
+            return_value="결과",
+        ),
+        patch("app.agents.reader.create_agent_message", new_callable=AsyncMock) as mock_create_am,
+        patch("app.agents.reader.update_agent_message_content", new_callable=AsyncMock),
+        patch("app.agents.reader.update_agent_message_status", new_callable=AsyncMock),
+    ):
+        mock_am = MagicMock()
+        mock_am.id = "test-id"
+        mock_create_am.return_value = mock_am
+
+        with pytest.raises(RuntimeError, match="통합 CLI 실패"):
+            await agent._team_execute(classification, "통합 실패", session.id, run.id)
+
+    assert "done" not in statuses

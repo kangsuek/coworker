@@ -67,3 +67,28 @@ async def test_second_agent_receives_first_result(db):
     assert "첫 번째 결과" in context
     assert "Coder-A" in context
     assert "두 번째 결과" in context
+
+
+@pytest.mark.asyncio
+async def test_assemble_exactly_3000_chars(db):
+    """정확히 3000자 → 요약 미호출."""
+    agent = ReaderAgent(db)
+    result = "A" * 3000
+    results = {"Agent-A": result}
+    with patch.object(agent, "_summarize_for_context", new_callable=AsyncMock) as mock_s:
+        context = await agent._assemble_context(results)
+    mock_s.assert_not_called()
+    assert result in context
+
+
+@pytest.mark.asyncio
+async def test_assemble_exactly_3001_chars(db):
+    """정확히 3001자 → 요약 호출 (경계값)."""
+    agent = ReaderAgent(db)
+    long_result = "A" * 3001
+    results = {"Agent-A": long_result}
+    with patch.object(agent, "_summarize_for_context", new_callable=AsyncMock) as mock_s:
+        mock_s.return_value = "요약"
+        context = await agent._assemble_context(results)
+    mock_s.assert_called_once_with("Agent-A", long_result)
+    assert "요약" in context

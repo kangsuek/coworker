@@ -7,11 +7,14 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import sqlite3
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.presets import coder, planner, researcher, reviewer, writer
 from app.agents.sub_agent import SubAgent
+from app.config import settings
 from app.models.schemas import AgentPlan, ClassificationResult
 from app.services.classification import parse_classification
 from app.services.cli_service import LineBufferFlusher, call_claude_streaming, execute_with_lock
@@ -25,7 +28,7 @@ from app.services.session_service import (
 
 logger = logging.getLogger(__name__)
 
-CONTEXT_CHAR_LIMIT = 3000
+CONTEXT_CHAR_LIMIT = int(os.getenv("CONTEXT_CHAR_LIMIT", "3000"))
 
 _PRESET_MAP = {
     "Researcher": researcher.SYSTEM_PROMPT,
@@ -139,7 +142,7 @@ class ReaderAgent:
             progress = f"{i + 1}/{len(classification.agents)}"
             await update_run_status(self.db, run_id, "working", progress=progress)
 
-            agent = self._create_agent(agent_plan)
+            agent = self._create_agent(agent_plan, i)
             context = await self._assemble_context(results)
 
             # Agent Channel DB 기록 생성
@@ -148,10 +151,6 @@ class ReaderAgent:
             )
 
             # LineBufferFlusher로 배치 DB 쓰기
-            import sqlite3
-
-            from app.config import settings
-
             accumulated: list[str] = []
 
             def flush_callback(lines: list[str]) -> None:
@@ -161,7 +160,9 @@ class ReaderAgent:
                 content = "".join(accumulated)
                 # 동기 sqlite3로 DB 업데이트 (aiosqlite와 별도 connection)
                 try:
-                    conn = sqlite3.connect(settings.db_path)
+                    conn = sqlite3.connect(settings.db_path, timeout=5)
+                    conn.execute("PRAGMA journal_mode=WAL;")
+                    conn.execute("PRAGMA busy_timeout=5000;")
                     conn.execute(
                         "UPDATE agent_messages SET content = ? WHERE id = ?",
                         (content, agent_msg.id),
@@ -169,7 +170,9 @@ class ReaderAgent:
                     conn.commit()
                     conn.close()
                 except Exception:
-                    pass
+                    logger.warning(
+                        "LineBufferFlusher DB 쓰기 실패: msg_id=%s", agent_msg.id, exc_info=True
+                    )
 
             flusher = LineBufferFlusher(flush_callback, flush_interval=0.5)
             flusher.start()
@@ -177,9 +180,14 @@ class ReaderAgent:
             def on_line(line: str) -> None:
                 flusher.append(line)
 
-            result = await execute_with_lock(
-                agent.execute(agent_plan.task, context, on_line)
-            )
+            try:
+                result = await execute_with_lock(
+                    agent.execute(agent_plan.task, context, on_line)
+                )
+            except Exception:
+                flusher.stop()
+                await update_agent_message_status(self.db, agent_msg.id, "error")
+                raise
             flusher.stop()
 
             # aiosqlite 세션으로 최종 content 동기화
@@ -192,11 +200,11 @@ class ReaderAgent:
         await create_user_message(self.db, session_id, "reader", final, mode="team")
         await update_run_status(self.db, run_id, "done", response=final, mode="team")
 
-    def _create_agent(self, agent_plan: AgentPlan) -> SubAgent:
+    def _create_agent(self, agent_plan: AgentPlan, index: int) -> SubAgent:
         """AgentPlan → SubAgent 생성."""
         system_prompt = _PRESET_MAP.get(agent_plan.role, _PRESET_MAP["Researcher"])
         return SubAgent(
-            name=f"{agent_plan.role}-A",
+            name=f"{agent_plan.role}-{index + 1}",
             role_preset=agent_plan.role,
             system_prompt=system_prompt,
         )
