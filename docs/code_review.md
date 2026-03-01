@@ -1,5 +1,11 @@
-# Sprint 3 코드 리뷰 (Code Review)
+# 코드 리뷰 (Code Review) - Sprint 1~4
 
-## 3. 개선 제안 (Optional)
-- **에러 로깅 (Logging)**: `reader.py`의 `process_message` 예외 처리 블록에 `logging` 모듈을 이용한 에러 로깅을 추가하면, 향후 실제 운영 단계나 Team 모드 개발 시 디버깅에 큰 도움이 될 수 있습니다.
-- **페이징 (Pagination)**: 현재 `GET /api/sessions`가 모든 세션을 반환하고 있습니다. 추후 데이터가 많아질 것을 대비해 `limit`/`offset` 등의 페이징 처리나 무한 스크롤(Cursor 기반) 준비를 고민해 볼 수 있습니다.
+## 3. 향후 개선 및 확장 제안 (Optional)
+1. **Frontend ↔ Backend 통신 에러 처리 (고도화)**
+   - 현행 `api.ts` 에러는 `res.ok`를 체크하고 에러 스로우를 발생시키는데, 서버 네트워크 단절 시 자동으로 재시도를 하거나 토스트(Toast) 형태의 글로벌 알림을 띄우도록 보강할 수 있습니다.
+2. **세션 동기화 타이밍 최적화**
+   - `useSession.ts`의 `addMessage` 호출 시 `api.getSessions()`로 전체 세션 목록을 갱신하는 로직이 있습니다. 이 때 짧은 시간 내 여러 번 상태가 업데이트되면 목록이 깜빡거릴 여지가 있으므로, 필요 시 디바운스(debounce) 처리나 낙관적 업데이트로만 목록을 유지하는 방향도 고려해 볼 수 있습니다.
+3. **Pydantic 스키마 Validation**
+   - 현재는 DB 응답 모델을 Pydantic 모델로 변환할 때 문제가 없으나, 응답 길이가 매우 길어지거나 유효하지 않은 타입이 섞이는 경우를 방지할 Strict Validation 설정 도입을 권장합니다.
+4. **에러 로깅 체계 강화**                                                                                                                                                                 │
+   - 테스트에서 `logging.error`가 올바르게 작동하는 것을 검증하긴 했으나, 추후 로깅 레벨(Info, Debug) 세분화 및 모니터링 연동을 준비하면 프로덕션 레벨 서비스 운영에 도움이 될 것입니다.

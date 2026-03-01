@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -52,9 +53,32 @@ class ReaderAgent:
             else:
                 # Sprint 5에서 Team 모드 구현
                 await update_run_status(self.db, run_id, "delegating", mode="team")
-        except Exception:
+        except Exception as e:
             logger.exception("process_message 실패: run_id=%s", run_id)
-            await update_run_status(self.db, run_id, "error")
+            error_msg = str(e)
+
+            if "Claude CLI error" in error_msg:
+                try:
+                    parts = error_msg.split("): ", 1)
+                    if len(parts) == 2:
+                        raw_output = parts[1].strip()
+                        if raw_output.startswith("{"):
+                            parsed = json.loads(raw_output)
+                            if "result" in parsed:
+                                error_msg = parsed["result"]
+                            elif "error" in parsed:
+                                error_msg = str(parsed["error"])
+                            else:
+                                error_msg = raw_output
+                        else:
+                            error_msg = raw_output
+                except Exception:
+                    pass
+
+            await create_user_message(
+                self.db, session_id, "reader", f"⚠️ 오류 발생: {error_msg}", mode="solo"
+            )
+            await update_run_status(self.db, run_id, "error", response=error_msg)
 
     async def _classify(self, user_message: str) -> ClassificationResult:
         """CLI로 Solo/Team 분류."""

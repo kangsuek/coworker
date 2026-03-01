@@ -81,7 +81,7 @@
 | 1 | 프로젝트 기반 구축 | 3일 | ✅ 완료 | 8/8 | ✅ 통과 |
 | 2 | CLI 서비스 및 핵심 인프라 | 4일 | ✅ 완료 | 5/5 | ✅ 통과 |
 | 3 | Solo 모드 End-to-End | 4일 | ✅ 완료 | 6/6 | ✅ 통과 |
-| 4 | 프론트엔드 기초 및 Solo UI | 5일 | 🔧 일부 완료 | 1/9 | ⬜ 미검증 |
+| 4 | 프론트엔드 기초 및 Solo UI | 5일 | ✅ 완료 | 9/9 | ✅ 통과 |
 | 5 | Team 모드 백엔드 | 5일 | ⬜ 미착수 | 0/8 | ⬜ 미검증 |
 | 6 | Team UI 및 마무리 | 5일 | ⬜ 미착수 | 0/9 | ⬜ 미검증 |
 
@@ -415,7 +415,7 @@
 
 ---
 
-## Sprint 4: 프론트엔드 기초 및 Solo UI 🔧
+## Sprint 4: 프론트엔드 기초 및 Solo UI ✅
 
 > **목표**: React 앱 구조, User Channel UI, 폴링 훅, Solo 모드 완전 동작
 > **PRD 참조**: Section 10 (UI/UX 명세), F-020~F-023
@@ -435,81 +435,80 @@
     - [x] `api.cancelRun()`, `api.getSessions()`, `api.createSession()`, `api.getSession()`
     - [x] 에러 처리 (`res.ok` 체크)
 
-- [ ] **4-2. `useRunPolling` 훅 구현** `[Plan: Medium]`
+- [x] **4-2. `useRunPolling` 훅 구현** `[Plan: Medium]`
   - 파일: `frontend/src/hooks/useRunPolling.ts`
-  - [ ] `useRunPolling(runId: string | null)` 시그니처
-  - [ ] 2초 + 지터(±300ms) 간격 폴링: `interval = 2000 + Math.random() * 600 - 300`
-  - [ ] `api.getRunStatus(runId)` 호출
-  - [ ] 터미널 상태 (`done` | `error` | `cancelled`) 도달 시 폴링 정지
-  - [ ] 반환: `{ status, progress, response, mode, agents }`
-  - [ ] cleanup: 컴포넌트 언마운트 시 폴링 정지
+  - [x] `useRunPolling(runId, callbacks?)` 시그니처 (onDone/onError/onCancelled 콜백)
+  - [x] 2초 + 지터(±300ms) 간격 폴링: `interval = 2000 + Math.random() * 600 - 300`
+  - [x] `api.getRunStatus(runId)` 호출
+  - [x] 터미널 상태 (`done` | `error` | `cancelled`) 도달 시 폴링 정지 + 콜백 호출
+  - [x] 반환: `RunStatus` (runId null이면 DEFAULT_STATE 반환)
+  - [x] cleanup: 컴포넌트 언마운트 시 폴링 정지
 
-- [ ] **4-3. `useSession` 훅 구현** `[Plan: Medium]`
+- [x] **4-3. `useSession` 훅 구현** `[Plan: Medium]`
   - 파일: `frontend/src/hooks/useSession.ts`
-  - [ ] 현재 활성 세션 ID 상태 관리
-  - [ ] `api.getSessions()` 로 세션 목록 로드
-  - [ ] `api.createSession()` 로 새 세션 생성
-  - [ ] `api.getSession(id)` 로 세션 전환 + 히스토리 로드
-  - [ ] 반환: `{ sessions, currentSession, messages, switchSession, createSession }`
+  - [x] 현재 활성 세션 + 메시지 상태 관리
+  - [x] `api.getSessions()` 로 세션 목록 로드 (마운트 시)
+  - [x] `api.createSession()` 로 새 세션 생성
+  - [x] `api.getSession(id)` 로 세션 전환 + 히스토리 로드
+  - [x] `addMessage`, `setCurrentSessionFromChat`, `refreshSessions` 유틸 제공
 
-- [ ] **4-4. 레이아웃 (2패널) 구현** `[Plan: Skip]`
+- [x] **4-4. 레이아웃 (2패널) 구현** `[Plan: Skip]`
   - 파일: `frontend/src/App.tsx`
-  - [ ] 좌측: Session Sidebar (접기/펼치기)
-  - [ ] 중앙: User Channel (메시지 목록 + 입력)
-  - [ ] 우측: Agent Channel (420px 고정폭)
-  - [ ] 실제 컴포넌트 연결 (현재 placeholder → 실제 컴포넌트)
-  - [ ] 세션 상태 전역 관리 (useSession 훅 통합)
+  - [x] 좌측: Session Sidebar (접기/펼치기)
+  - [x] 중앙: User Channel (메시지 목록 + 입력)
+  - [x] 우측: Agent Channel (420px 고정폭)
+  - [x] 실제 컴포넌트 연결 (useSession 훅 통합)
+  - [x] 세션 전환 시 UserChannel key prop으로 상태 자동 reset
 
-- [ ] **4-5. User Channel 컴포넌트 구현** `[Plan: Skip]`
+- [x] **4-5. User Channel 컴포넌트 구현** `[Plan: Skip]`
   - 파일: `frontend/src/components/UserChannel/index.tsx`
-  - [ ] 메시지 목록 렌더링 (MessageBubble 사용)
-  - [ ] 메시지 입력 영역 (textarea/input)
-  - [ ] 전송 버튼 → `api.chat()` 호출 → `runId` 수신
-  - [ ] `useRunPolling(runId)` 연동
-  - [ ] `done` 시 응답을 새 메시지로 추가
-  - [ ] 자동 스크롤 (최신 메시지로)
-  - [ ] 전송 중 입력 비활성화
+  - [x] 메시지 목록 렌더링 (MessageBubble 사용)
+  - [x] 메시지 입력 영역 (input + Enter 전송)
+  - [x] 전송 버튼 → `api.chat()` 호출 → `runId` 수신
+  - [x] `useRunPolling(runId, callbacks)` 연동
+  - [x] `done` 시 응답을 새 메시지로 추가 (콜백 기반)
+  - [x] 자동 스크롤 (최신 메시지로)
+  - [x] 전송 중 입력 비활성화
 
-- [ ] **4-6. StatusBadge 컴포넌트 구현** `[Plan: Skip]`
+- [x] **4-6. StatusBadge 컴포넌트 구현** `[Plan: Skip]`
   - 파일: `frontend/src/components/UserChannel/StatusBadge.tsx`
-  - [ ] 7개 상태별 표시: queued, thinking, solo, delegating, working, integrating, done
-  - [ ] 상태별 색상/아이콘 매핑
-  - [ ] `error`, `cancelled` 상태 표시
+  - [x] 9개 상태별 표시: queued, thinking, solo, delegating, working, integrating, done, error, cancelled
+  - [x] 상태별 색상 + pulse 애니메이션 (진행 중 상태)
+  - [x] `progress` 표시 지원
 
-- [ ] **4-7. 마크다운 렌더링 구현** `[Plan: Skip]`
+- [x] **4-7. 마크다운 렌더링 구현** `[Plan: Skip]`
   - 파일: `frontend/src/components/UserChannel/MessageBubble.tsx`
-  - [ ] `react-markdown` 패키지 설치 및 적용
-  - [ ] `rehype-highlight` (또는 `react-syntax-highlighter`) 설치
-  - [ ] Reader 응답 메시지에 마크다운 렌더링 적용
-  - [ ] 코드 블록 구문 하이라이팅
-  - [ ] User 메시지는 일반 텍스트 렌더링
-  - [ ] 역할별 (user/reader) 버블 스타일 분기
+  - [x] `react-markdown` + `rehype-highlight` 설치 및 적용
+  - [x] `highlight.js/styles/github.css` 임포트
+  - [x] Reader 응답 메시지에 마크다운 렌더링 (h1~h3, ul/ol, pre/code, blockquote 등)
+  - [x] 코드 블록 구문 하이라이팅
+  - [x] User 메시지는 일반 텍스트 렌더링
+  - [x] 역할별 (user/reader) 버블 스타일 분기
 
-- [ ] **4-8. 세션 사이드바 구현** `[Plan: Skip]`
+- [x] **4-8. 세션 사이드바 구현** `[Plan: Skip]`
   - 파일: `frontend/src/components/SessionList/index.tsx`
-  - [ ] 세션 목록 표시 (최신순)
-  - [ ] 세션 클릭 → 전환 (히스토리 로드)
-  - [ ] "새 세션" 버튼 → 세션 생성
-  - [ ] 현재 활성 세션 하이라이트
-  - [ ] `useSession` 훅 연동
+  - [x] 세션 목록 표시 (최신순, 날짜 포맷)
+  - [x] 세션 클릭 → 전환 (히스토리 로드)
+  - [x] "새 세션" 버튼 → `api.createSession()` 호출
+  - [x] 현재 활성 세션 하이라이트
 
-- [ ] **4-9. Agent Channel 대기 상태 구현** `[Plan: Skip]`
+- [x] **4-9. Agent Channel 대기 상태 구현** `[Plan: Skip]`
   - 파일: `frontend/src/components/AgentChannel/index.tsx`
-  - [ ] Solo 모드 시 "대기 중" 플레이스홀더 표시
-  - [ ] Team 모드 전환 시 메시지 목록으로 변경 준비 (Sprint 6에서 완성)
+  - [x] Solo/null 모드 시 "대기 중" 플레이스홀더 표시
+  - [x] Team 모드 시 전환 준비 (Sprint 6에서 완성)
 
-### Sprint 4 테스트 게이트 🚧 (마일스톤 M1)
+### Sprint 4 테스트 게이트 ✅ (마일스톤 M1)
 
 > **다음 Sprint 진입 조건: 아래 전체 통과 필수**
 
-- [ ] `cd backend && uv run pytest -v` → **백엔드 전체 테스트 100% PASS**
-- [ ] `cd frontend && npx tsc --noEmit` → **TypeScript 타입 체크 통과**
-- [ ] `cd frontend && npm run lint` → **ESLint 에러 없음**
-- [ ] `cd frontend && npm run build` → **프로덕션 빌드 성공**
-- [ ] 수동 검증: 메시지 입력 → 전송 → StatusBadge 상태 변화 → Reader 응답 표시
-- [ ] 수동 검증: 마크다운·코드 블록 렌더링 정상
-- [ ] 수동 검증: 세션 목록·전환·새 세션 생성·히스토리 복원
-- [ ] 🚫 1개라도 실패 시 Sprint 5 진입 금지
+- [x] `cd backend && uv run pytest -v` → **백엔드 전체 테스트 100% PASS (47개)**
+- [x] `cd frontend && npx tsc --noEmit` → **TypeScript 타입 체크 통과**
+- [x] `cd frontend && npm run lint` → **ESLint 에러 없음**
+- [x] `cd frontend && npm run build` → **프로덕션 빌드 성공**
+- [x] 수동 검증: 메시지 입력 → 전송 → StatusBadge 상태 변화 → Reader 응답 표시 — thinking→solo→done 상태 전이 확인 (11초)
+- [x] 수동 검증: 마크다운·코드 블록 렌더링 정상 — `#`, `##`, ` ``` `, `` ` `` 포함 응답 수신 확인
+- [x] 수동 검증: 세션 목록·전환·새 세션 생성·히스토리 복원 — 10개 세션, limit/offset 페이지네이션, 히스토리 2개 메시지 복원 확인
+- [x] ✅ Sprint 5 진입 가능
 
 ---
 

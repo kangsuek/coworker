@@ -3,15 +3,18 @@
 
 # 개발 서버 실행 (백엔드 + 프론트엔드 동시)
 dev:
+    mkdir -p logs
     just backend & just frontend
 
 # 백엔드 개발 서버
 backend:
-    cd backend && uv run uvicorn app.main:app --reload --port 8000
+    mkdir -p logs
+    cd backend && uv run uvicorn app.main:app --reload --port 8000 2>&1 | tee ../logs/backend.log
 
 # 프론트엔드 개발 서버
 frontend:
-    cd frontend && npm run dev
+    mkdir -p logs
+    cd frontend && npm run dev 2>&1 | tee ../logs/frontend.log
 
 # 의존성 설치 + Claude CLI 확인
 setup:
