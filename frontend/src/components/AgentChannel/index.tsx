@@ -73,8 +73,8 @@ export default function AgentChannel({
 
   if (collapsed) {
     return (
-      <div className="w-full min-w-0 min-h-0 h-full flex flex-col bg-gray-50/80 dark:bg-gray-800/80 shrink-0 relative overflow-hidden">
-        <div className="h-8 flex items-center justify-center border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shrink-0">
+      <div className="w-full min-w-0 min-h-0 h-full flex flex-col bg-[#0D0D0D] dark:bg-[#0D0D0D] shrink-0 relative overflow-hidden">
+        <div className="h-8 flex items-center justify-center border-b border-white/10 dark:border-white/10 bg-[#141414] dark:bg-[#141414] shrink-0">
           {onExpand && (
             <button
               type="button"
@@ -106,9 +106,9 @@ export default function AgentChannel({
   }
 
   return (
-    <div className="w-full min-w-0 min-h-0 h-full flex flex-col bg-gray-50/80 dark:bg-gray-800/80 shrink-0 relative overflow-hidden">
-      <header className="h-8 pl-4 pr-0 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shrink-0 flex items-center justify-between">
-        <span className="font-medium text-gray-800 dark:text-gray-200 truncate min-w-0">Agent Channel</span>
+    <div className="w-full min-w-0 min-h-0 h-full flex flex-col bg-[#0D0D0D] dark:bg-[#0D0D0D] shrink-0 relative overflow-hidden">
+      <header className="h-8 pl-4 pr-0 border-b border-white/10 dark:border-white/10 bg-[#141414] dark:bg-[#141414] shrink-0 flex items-center justify-between">
+        <span className="font-medium text-gray-200 dark:text-gray-200 truncate min-w-0">Agent Channel</span>
         <div className="flex items-center gap-1 shrink-0">
           {hasMessages && (
             <>
@@ -152,15 +152,15 @@ export default function AgentChannel({
           </>
         ) : isTeamActive && isPolling ? (
           <div className="flex flex-col items-center justify-center h-full text-gray-400 dark:text-gray-500">
-            <p className="text-2xl mb-2">⚙️</p>
-            <p className="text-sm">Agent 작업 시작 중...</p>
+            <div className="w-3 h-4 bg-emerald-500 animate-pulse mb-3" />
+            <p className="text-sm font-mono text-emerald-500">&gt; Agent 작업 시작 중...</p>
           </div>
         ) : (
           <div className="flex flex-col items-center justify-center h-full text-gray-400 dark:text-gray-500">
-            <p className="text-3xl mb-3">🤖</p>
-            <p className="text-sm font-medium">대기 중</p>
-            <p className="text-xs mt-1.5 text-gray-300 dark:text-gray-400">Team 작업이 시작되면</p>
-            <p className="text-xs text-gray-300 dark:text-gray-400">Agent 간 대화가 표시됩니다</p>
+            <div className="w-3 h-4 bg-emerald-500 animate-pulse mb-3" />
+            <p className="text-sm font-mono text-emerald-500">&gt; Team 작업이 시작되면</p>
+            <p className="text-xs font-mono text-gray-500 mt-1.5">Agent 간 대화가 시작됩니다.</p>
+            
           </div>
         )}
         <div ref={messagesEndRef} />

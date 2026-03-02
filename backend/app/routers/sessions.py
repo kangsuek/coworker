@@ -1,9 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.db import get_db
+from app.models.db import Run, get_db
 from app.models.schemas import SessionDetail, SessionOut, UserMessageOut
 from app.services import session_service
+from app.services.cli_service import cancel_current
+
+_ACTIVE_RUN_STATUSES = {"queued", "thinking", "solo", "delegating", "working", "integrating"}
 
 router = APIRouter(tags=["sessions"])
 
@@ -33,7 +37,20 @@ async def create_new_session(db: AsyncSession = Depends(get_db)):
 
 @router.delete("/sessions/{session_id}", status_code=204)
 async def delete_session(session_id: str, db: AsyncSession = Depends(get_db)):
-    """세션 삭제 (관련 메시지·runs 포함)."""
+    """세션 삭제 (관련 메시지·runs 포함).
+
+    실행 중인 Run이 있으면 CLI 프로세스를 먼저 취소한 뒤 삭제한다.
+    취소하지 않으면 백그라운드 태스크가 고아(orphan) 레코드를 생성한다.
+    """
+    result = await db.execute(
+        select(Run).where(
+            Run.session_id == session_id,
+            Run.status.in_(_ACTIVE_RUN_STATUSES),
+        )
+    )
+    if result.scalar_one_or_none() is not None:
+        await cancel_current()
+
     deleted = await session_service.delete_session(db, session_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Session not found")

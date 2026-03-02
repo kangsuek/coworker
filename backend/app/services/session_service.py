@@ -28,8 +28,9 @@ async def delete_session(db: AsyncSession, session_id: str) -> bool:
     session = await db.get(models.Session, session_id)
     if session is None:
         return False
-    await db.execute(delete(models.Run).where(models.Run.session_id == session_id))
+    # FK 제약 순서: AgentMessage(run_id→runs) → Run(user_message_id→user_messages) → UserMessage → Session
     await db.execute(delete(models.AgentMessage).where(models.AgentMessage.session_id == session_id))
+    await db.execute(delete(models.Run).where(models.Run.session_id == session_id))
     await db.execute(delete(models.UserMessage).where(models.UserMessage.session_id == session_id))
     await db.delete(session)
     await db.commit()

@@ -13,11 +13,12 @@ import sqlite3
 from sqlalchemy import text as sql_text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models import db as models
 from app.agents.presets import coder, planner, researcher, reviewer, writer
 from app.agents.sub_agent import SubAgent
 from app.config import settings
 from app.models.schemas import AgentPlan, ClassificationResult
-from app.services.classification import classify_message, parse_classification
+from app.services.classification import classify_message
 from app.services.cli_service import LineBufferFlusher, call_claude_streaming, execute_with_lock
 from app.services.session_service import (
     create_agent_message,
@@ -58,16 +59,6 @@ _SUMMARIZE_SYSTEM_PROMPT = (
 
 
 class ReaderAgent:
-    CLASSIFY_SYSTEM_PROMPT = (
-        "당신은 요청 라우터입니다. "
-        "사용자 메시지를 분석하고 아래 JSON 형식으로만 응답하세요.\n\n"
-        "solo: 단순 질문/답변, 단일 태스크, 창작, 번역, 요약 등\n"
-        "team: 복잡한 프로젝트, 다단계 작업, 여러 전문 분야 필요\n\n"
-        '{"mode": "solo"|"team", "reason": "이유", "agents": [], "user_status_message": null}\n\n'
-        "team일 때 agents 예시:\n"
-        '{"role": "Researcher"|"Coder"|"Reviewer"|"Writer"|"Planner", "task": "구체적 태스크"}\n\n'
-        "JSON만 출력. 다른 텍스트 금지."
-    )
     SOLO_SYSTEM_PROMPT = (
         "당신은 친절하고 유능한 AI 어시스턴트입니다. "
         "사용자의 질문에 명확하고 도움이 되는 답변을 제공합니다."
@@ -87,6 +78,10 @@ class ReaderAgent:
             if result.mode == "solo":
                 await update_run_status(self.db, run_id, "solo")
                 text = await self._solo_respond(user_message)
+                # CLI 실행 도중 세션이 삭제됐을 수 있으므로 run 존재 여부 재확인
+                if await self.db.get(models.Run, run_id) is None:
+                    logger.info("solo 완료 후 run이 삭제됨, DB 쓰기 건너뜀: run_id=%s", run_id)
+                    return
                 await create_user_message(self.db, session_id, "reader", text, mode="solo")
                 await update_run_status(self.db, run_id, "done", response=text, mode="solo")
             else:
@@ -94,12 +89,16 @@ class ReaderAgent:
         except Exception as e:
             logger.exception("process_message 실패: run_id=%s", run_id)
 
-            # 취소된 run은 에러 상태로 덮어쓰지 않음 (cancel_run 엔드포인트와의 race condition 방어)
+            # run이 삭제됐으면 (세션 삭제 등) 고아 레코드 생성을 막기 위해 즉시 반환
             status_row = await self.db.execute(
                 sql_text("SELECT status FROM runs WHERE id = :run_id"), {"run_id": run_id}
             )
             row = status_row.fetchone()
-            if row and row[0] == "cancelled":
+            if row is None:
+                logger.info("process_message 예외 발생했으나 run이 삭제됨: run_id=%s", run_id)
+                return
+            # 취소된 run은 에러 상태로 덮어쓰지 않음 (cancel_run 엔드포인트와의 race condition 방어)
+            if row[0] == "cancelled":
                 logger.info("process_message 예외 발생했으나 이미 취소됨: run_id=%s", run_id)
                 return
 
@@ -129,24 +128,13 @@ class ReaderAgent:
             await update_run_status(self.db, run_id, "error", response=error_msg)
 
     async def _classify(self, user_message: str) -> ClassificationResult:
-        """Solo/Team 분류: 규칙 기반 1차 판정 → 모호하면 haiku CLI 호출."""
-        # 1차: 규칙 기반 (명확한 경우 CLI 호출 생략)
-        rule_result = classify_message(user_message)
-        if rule_result.mode == "team":
-            logger.info("_classify (rule-based): mode=team agents=%s", rule_result.agents)
-            return rule_result
+        """Solo/Team 분류: 규칙 기반 판정만 사용 (CLI 호출 없음).
 
-        # 2차: haiku CLI 호출로 최종 판정 (solo 또는 모호한 경우)
-        raw = await execute_with_lock(
-            call_claude_streaming(
-                self.CLASSIFY_SYSTEM_PROMPT,
-                user_message,
-                output_json=True,
-                model=settings.solo_model,
-            )
-        )
-        result = parse_classification(raw)
-        logger.info("_classify (haiku): mode=%s reason=%s agents=%s", result.mode, result.reason, result.agents)
+        2차 CLI 판정을 제거해 분류 지연(3~15초)과 _cli_lock 선점 문제를 해소한다.
+        Team 트리거는 TEAM_TRIGGER_KEYWORDS 환경변수로 코드 수정 없이 확장 가능.
+        """
+        result = classify_message(user_message)
+        logger.info("_classify (rule-based): mode=%s agents=%s", result.mode, result.agents)
         return result
 
     async def _solo_respond(self, user_message: str) -> str:
@@ -236,6 +224,10 @@ class ReaderAgent:
 
         await update_run_status(self.db, run_id, "integrating")
         final = await self._integrate_results(user_message, results)
+        # 통합 CLI 실행 도중 세션이 삭제됐을 수 있으므로 run 존재 여부 재확인
+        if await self.db.get(models.Run, run_id) is None:
+            logger.info("team 통합 완료 후 run이 삭제됨, DB 쓰기 건너뜀: run_id=%s", run_id)
+            return
         await create_user_message(self.db, session_id, "reader", final, mode="team")
         await update_run_status(self.db, run_id, "done", response=final, mode="team")
 

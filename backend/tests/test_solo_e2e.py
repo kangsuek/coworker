@@ -24,10 +24,7 @@ async def test_solo_e2e_full_flow(client, db):
         patch("app.routers.chat.async_session", return_value=_make_session_cm(db)),
         patch("app.agents.reader.call_claude_streaming", new_callable=AsyncMock) as mock_cli,
     ):
-        mock_cli.side_effect = [
-            '{"mode":"solo","reason":"단순 질문","agents":[]}',
-            "Solo 응답 텍스트",
-        ]
+        mock_cli.return_value = "Solo 응답 텍스트"
         post_resp = await client.post("/api/chat", json={"message": "안녕하세요"})
 
     assert post_resp.status_code == 200
@@ -70,10 +67,7 @@ async def test_solo_e2e_rule_based_solo_fallback(client, db):
         patch("app.routers.chat.async_session", return_value=_make_session_cm(db)),
         patch("app.agents.reader.call_claude_streaming", new_callable=AsyncMock) as mock_cli,
     ):
-        mock_cli.side_effect = [
-            '{"mode":"solo","reason":"단순","agents":[]}',
-            "Solo 응답",
-        ]
+        mock_cli.return_value = "Solo 응답"
         post_resp = await client.post("/api/chat", json={"message": "분류 불가 요청"})
 
     assert post_resp.status_code == 200

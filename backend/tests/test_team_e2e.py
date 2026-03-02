@@ -10,6 +10,7 @@ import pytest
 @pytest.mark.asyncio
 async def test_team_e2e_full_flow(client):
     """POST → 폴링 → delegating → working → integrating → done."""
+    from app.agents.reader import ReaderAgent
     from app.models.schemas import AgentPlan, ClassificationResult
 
     team_classification = ClassificationResult(
@@ -24,7 +25,7 @@ async def test_team_e2e_full_flow(client):
 
     with (
         patch("app.agents.reader.execute_with_lock") as mock_lock,
-        patch("app.agents.reader.parse_classification", return_value=team_classification),
+        patch.object(ReaderAgent, "_classify", new_callable=AsyncMock, return_value=team_classification),
         patch("app.agents.reader.create_agent_message", new_callable=AsyncMock) as mock_create_am,
         patch("app.agents.reader.update_agent_message_content", new_callable=AsyncMock),
         patch("app.agents.reader.update_agent_message_status", new_callable=AsyncMock),
@@ -38,7 +39,7 @@ async def test_team_e2e_full_flow(client):
         async def fake_lock(coro):
             nonlocal call_count
             call_count += 1
-            # 1번: 분류 (skip), 2~3번: agent 실행, 4번: 통합
+            # 1~2번: agent 실행, 3번: 통합 (분류는 규칙 기반이므로 lock 없음)
             return await coro
 
         mock_lock.side_effect = fake_lock

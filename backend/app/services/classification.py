@@ -11,29 +11,18 @@ import re
 
 from pydantic import ValidationError
 
+from app.config import settings
 from app.models.schemas import AgentPlan, ClassificationResult
 
 # ── 규칙 기반 분류 ──────────────────────────────────────────────────────────
 
-_TEAM_TRIGGER_KEYWORDS = [
-    "각각", "전문가", "팀프로젝트", "팀 프로젝트", "단계별", "분야별",
-    "다단계", "여러 분야", "각 전문가",
-]
-
-# 역할별 키워드: 먼저 매칭된 역할로 결정 (순서가 우선순위)
-# Writer를 Planner보다 먼저 배치 — "마케팅 계획" 처럼 도메인 키워드가 "계획"보다 우선
-_ROLE_MAP: list[tuple[str, list[str]]] = [
-    ("Researcher", ["조사", "리서치", "분석", "시장", "경쟁사", "데이터 수집", "현황", "정보 수집"]),
-    ("Writer",     ["마케팅", "홍보", "카피", "콘텐츠", "글쓰기", "작성", "문서", "보고서"]),
-    ("Planner",    ["전략", "기획", "투자", "유치", "계획", "로드맵", "설계", "아키텍처"]),
-    ("Coder",      ["코드", "구현", "개발", "프로그래밍", "기술", "빌드"]),
-    ("Reviewer",   ["리뷰", "검토", "테스트", "감사", "검증", "평가", "피드백"]),
-]
-
 
 def _role_for_task(task: str) -> str:
-    """태스크 텍스트에서 적합한 Agent 역할 결정."""
-    for role, keywords in _ROLE_MAP:
+    """태스크 텍스트에서 적합한 Agent 역할 결정.
+
+    순서 및 키워드는 settings.role_map에서 결정 (환경변수로 재정의 가능).
+    """
+    for role, keywords in settings.role_map:
         if any(kw in task for kw in keywords):
             return role
     return "Researcher"
@@ -43,18 +32,13 @@ def classify_message(user_message: str) -> ClassificationResult:
     """규칙 기반 Solo/Team 분류. CLI 호출 없이 즉시 결정.
 
     판정 기준:
-    - 번호 목록 3개 이상 → team
-    - 팀/전문가/각각 등 키워드 포함 → team
+    - TEAM_TRIGGER_HEADER 값으로 시작하는 메시지 → team 시도
+      - 헤더 이후 번호 목록 2개 이상이면 team, 미만이면 solo fallback
     - 그 외 → solo
     """
-    # 번호 목록 추출: "1. task", "1) task", "2.task" 형태
-    raw_items = re.findall(r"\d+[.)]\s*(.+?)(?=,?\s*\d+[.)]|$|\n)", user_message.strip())
-    numbered_items = [t.strip().strip(",").strip() for t in raw_items if t.strip()]
+    header = settings.team_trigger_header.strip()
 
-    has_team_keyword = any(kw in user_message for kw in _TEAM_TRIGGER_KEYWORDS)
-    is_team = len(numbered_items) >= 3 or has_team_keyword
-
-    if not is_team:
+    if not (header and user_message.startswith(header)):
         return ClassificationResult(
             mode="solo",
             reason="단순 요청",
@@ -62,7 +46,12 @@ def classify_message(user_message: str) -> ClassificationResult:
             user_status_message=None,
         )
 
-    # 번호 목록에서 에이전트 생성 (최대 5개)
+    # 헤더 이후 텍스트에서 번호 목록 추출: "1. task", "1) task", "2.task" 형태
+    body = user_message[len(header):].strip()
+    raw_items = re.findall(r"\d+[.)]\s*(.+?)(?=,?\s*\d+[.)]|$|\n)", body)
+    numbered_items = [t.strip().strip(",").strip() for t in raw_items if t.strip()]
+
+    # 에이전트 구성 (최대 5개)
     agents: list[AgentPlan] = [
         AgentPlan(role=_role_for_task(task), task=task)
         for task in numbered_items[:5]

@@ -40,9 +40,9 @@ async def test_classify_returns_solo(db):
 
 @pytest.mark.asyncio
 async def test_classify_returns_team(db):
-    """번호 목록 3개 이상 → 규칙 기반으로 즉시 team 반환 (CLI 호출 없음)."""
+    """헤더 + 번호 목록 → 규칙 기반으로 즉시 team 반환 (CLI 호출 없음)."""
     result = await ReaderAgent(db)._classify(
-        "1. 시장 조사, 2. 기술 설계, 3. 마케팅 전략을 각각 작성해줘."
+        "(팀모드) 1. 시장 조사, 2. 기술 설계, 3. 마케팅 전략을 작성해줘."
     )
     assert result.mode == "team"
     assert len(result.agents) == 3
@@ -66,11 +66,8 @@ async def test_process_message_solo_flow(db):
     run = await create_run(db, sess.id, msg.id)
 
     with patch("app.agents.reader.call_claude_streaming", new_callable=AsyncMock) as mock_cli:
-        # 분류 CLI(haiku) 1회 + solo 응답 1회
-        mock_cli.side_effect = [
-            '{"mode":"solo","reason":"간단","agents":[]}',
-            "안녕하세요!",
-        ]
+        # solo 응답 1회 (분류는 규칙 기반이므로 CLI 호출 없음)
+        mock_cli.return_value = "안녕하세요!"
         agent = ReaderAgent(db)
         await agent.process_message(sess.id, "안녕", run.id)
 

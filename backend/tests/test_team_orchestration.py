@@ -107,7 +107,10 @@ async def test_team_execute_runs_agents_sequentially(db):
         with patch("app.agents.sub_agent.SubAgent.execute", side_effect=fake_execute):
             await agent._team_execute(classification, "팀 작업", session.id, run.id)
 
-    assert call_order == ["리서치", "코딩"]
+    # full_task는 "[전체 프로젝트 요청]...\n[당신의 담당 태스크]\n{task}" 포맷으로 전달됨
+    assert len(call_order) == 2
+    assert "리서치" in call_order[0]
+    assert "코딩" in call_order[1]
 
 
 @pytest.mark.asyncio

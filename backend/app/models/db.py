@@ -27,6 +27,7 @@ def _set_sqlite_pragmas(dbapi_conn, _connection_record):
     cursor = dbapi_conn.cursor()
     cursor.execute("PRAGMA journal_mode=WAL;")
     cursor.execute("PRAGMA busy_timeout=5000;")
+    cursor.execute("PRAGMA foreign_keys=ON;")
     cursor.close()
 
 
@@ -73,7 +74,7 @@ class AgentMessage(Base):
 
     id: Mapped[str] = mapped_column(primary_key=True, default=lambda: str(uuid.uuid4()))
     session_id: Mapped[str] = mapped_column(ForeignKey("sessions.id"), index=True)
-    run_id: Mapped[str] = mapped_column(Text, index=True)
+    run_id: Mapped[str] = mapped_column(ForeignKey("runs.id"), index=True)
     sender: Mapped[str] = mapped_column(Text)
     role_preset: Mapped[str] = mapped_column(Text)
     content: Mapped[str] = mapped_column(Text, default="")

@@ -38,12 +38,12 @@ export default function SessionList({
 }: Props) {
   if (collapsed) {
     return (
-      <aside className="w-full min-w-0 min-h-0 h-full border-r border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 flex flex-col shrink-0 overflow-hidden">
-        <div className="h-8 flex items-center justify-center border-b border-gray-200 dark:border-gray-700 shrink-0">
+      <aside className="w-full min-w-0 min-h-0 h-full border-r border-white/10 dark:border-white/10 bg-[#141414] dark:bg-[#141414] flex flex-col shrink-0 overflow-hidden">
+        <div className="h-8 flex items-center justify-center border-b border-white/10 dark:border-white/10 shrink-0">
           <button
             type="button"
             onClick={onExpand}
-            className="p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-gray-600 dark:text-gray-400"
+            className="p-2 rounded hover:bg-white/5 dark:hover:bg-white/5 transition-colors text-gray-600 dark:text-gray-400"
             title="세션 목록 펼치기"
             aria-label="세션 목록 펼치기"
           >
@@ -54,7 +54,7 @@ export default function SessionList({
           <button
             type="button"
             onClick={onExpand}
-            className="rounded hover:bg-gray-100 dark:hover:bg-gray-700 p-1.5 text-gray-500 dark:text-gray-400"
+            className="rounded hover:bg-white/5 dark:hover:bg-white/5 p-1.5 text-gray-500 dark:text-gray-400"
             title="세션 목록 펼치기"
           >
             <span className="text-sm font-medium" style={{ writingMode: 'vertical-rl' }}>
@@ -67,16 +67,16 @@ export default function SessionList({
   }
 
   return (
-    <aside className="w-full min-w-0 min-h-0 h-full border-r border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 flex flex-col shrink-0 overflow-hidden">
-      <div className="h-8 flex items-center justify-between gap-2 pl-4 pr-0 border-b border-gray-200 dark:border-gray-700 shrink-0">
-        <h1 className="text-lg font-bold text-gray-900 dark:text-gray-100 truncate min-w-0 flex-1">
+    <aside className="w-full min-w-0 min-h-0 h-full border-r border-white/10 dark:border-white/10 bg-[#141414] dark:bg-[#141414] flex flex-col shrink-0 overflow-hidden">
+      <div className="h-8 flex items-center justify-between gap-2 pl-4 pr-0 border-b border-white/10 dark:border-white/10 shrink-0">
+        <h1 className="text-lg font-bold text-gray-200 dark:text-gray-200 truncate min-w-0 flex-1">
           Coworker
         </h1>
         <div className="flex items-center gap-1 shrink-0">
           <button
             type="button"
             onClick={onThemeToggle}
-            className="h-6 w-6 flex items-center justify-center rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-gray-600 dark:text-gray-400"
+            className="h-6 w-6 flex items-center justify-center rounded hover:bg-white/5 dark:hover:bg-white/5 transition-colors text-gray-600 dark:text-gray-400"
             title={theme === 'light' ? '다크 모드로 전환' : '라이트 모드로 전환'}
             aria-label={theme === 'light' ? '다크 모드로 전환' : '라이트 모드로 전환'}
           >
@@ -89,7 +89,7 @@ export default function SessionList({
           <button
             type="button"
             onClick={onCollapse}
-            className="h-6 w-6 flex items-center justify-center rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-gray-600 dark:text-gray-400"
+            className="h-6 w-6 flex items-center justify-center rounded hover:bg-white/5 dark:hover:bg-white/5 transition-colors text-gray-600 dark:text-gray-400"
             title="세션 목록 접기"
             aria-label="세션 목록 접기"
           >
@@ -107,26 +107,26 @@ export default function SessionList({
           sessions.map((sess) => (
             <div
               key={sess.id}
-              className={`flex items-center gap-1 rounded-lg mb-0.5 border border-gray-200 dark:border-gray-600 ${
+              className={`flex items-center gap-1 rounded-sm mb-0 border border-transparent ${
                 sess.id === currentSessionId
-                  ? 'bg-blue-50 dark:bg-blue-900/30'
-                  : 'hover:bg-gray-100 dark:hover:bg-gray-700'
+                  ? 'bg-white/5 dark:bg-white/5 border-l-2 border-l-emerald-500 rounded-none'
+                  : 'hover:bg-white/5 dark:hover:bg-white/5'
               }`}
             >
               <button
                 type="button"
                 onClick={() => onSwitch(sess.id)}
-                className={`flex-1 min-w-0 text-left px-3 py-2.5 transition-colors rounded-l-lg ${
+                className={`flex-1 min-w-0 text-left px-2 py-1.5 transition-colors rounded-l-lg ${
                   sess.id === currentSessionId
-                    ? 'text-blue-700 dark:text-blue-300'
+                    ? 'text-emerald-500 dark:text-emerald-500'
                     : 'text-gray-700 dark:text-gray-300'
                 }`}
               >
                 <span
                   className={`block truncate text-sm font-medium ${
                     sess.id === currentSessionId
-                      ? 'text-blue-700 dark:text-blue-300'
-                      : 'text-gray-800 dark:text-gray-200'
+                      ? 'text-emerald-500 dark:text-emerald-500'
+                      : 'text-gray-300 dark:text-gray-300'
                   }`}
                 >
                   {sess.title ?? '새 대화'}
@@ -152,10 +152,10 @@ export default function SessionList({
         )}
       </div>
 
-      <div className="h-10 flex items-center px-3 py-1.5 border-t border-gray-200 dark:border-gray-700 shrink-0">
+      <div className="h-10 flex items-center px-3 py-1.5 border-t border-white/10 dark:border-white/10 shrink-0">
         <button
           onClick={onCreate}
-          className="w-full py-1.5 px-2 bg-blue-600 dark:bg-blue-500 text-white rounded-lg text-xs font-medium hover:bg-blue-700 dark:hover:bg-blue-600 transition-colors"
+          className="w-full py-1.5 px-2 bg-emerald-600 dark:bg-emerald-600 text-white rounded-sm text-xs font-mono font-medium hover:bg-emerald-700 dark:hover:bg-emerald-700 transition-colors"
         >
           + 새 세션
         </button>

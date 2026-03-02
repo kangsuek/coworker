@@ -306,31 +306,48 @@ def test_classify_simple_question_is_solo():
 
 
 def test_classify_two_numbered_items_is_solo():
-    """번호 목록 2개만 있으면 solo (팀 키워드 없을 때)."""
+    """번호 목록 2개 + 헤더 없음 → solo."""
     result = classify_message("1. 조사 2. 분석")
     assert result.mode == "solo"
 
 
-def test_classify_three_numbered_items_is_team():
-    """번호 목록 3개 이상 → team."""
+def test_classify_three_numbered_items_without_header_is_solo():
+    """번호 목록만으로는 team 전환 불가 (헤더 없음) → solo."""
     result = classify_message("1. 시장 조사 2. 기술 설계 3. 마케팅 계획")
-    assert result.mode == "team"
-    assert len(result.agents) == 3
+    assert result.mode == "solo"
 
 
-def test_classify_team_keyword_triggers_team():
-    """'각각' 키워드만으로 team 감지."""
+def test_classify_keyword_alone_is_solo():
+    """키워드만으로는 team 전환 불가 (헤더 없음) → solo."""
     result = classify_message("1. 시장 조사, 2. 마케팅을 각각 전문가가 작성해줘.")
+    assert result.mode == "solo"
+
+
+def test_classify_header_triggers_team_with_numbered_items():
+    """헤더 + 번호 목록 2개 이상 → team."""
+    result = classify_message("(팀모드) 1. 시장 조사 2. 마케팅 전략")
     assert result.mode == "team"
     assert len(result.agents) == 2
 
 
+def test_classify_header_without_numbered_items_is_solo():
+    """헤더로 시작하지만 번호 목록 없음 → solo fallback."""
+    result = classify_message("(팀모드) 전체 마케팅 전략을 수립해줘")
+    assert result.mode == "solo"
+
+
+def test_classify_header_with_one_item_is_solo():
+    """헤더 + 번호 목록 1개 → solo fallback (에이전트 2개 미만)."""
+    result = classify_message("(팀모드) 1. 시장 조사")
+    assert result.mode == "solo"
+
+
 def test_classify_startup_business_plan_is_team():
-    """AI 스타트업 사업 계획서 요청 → team 4개 에이전트."""
+    """헤더 + 번호 목록 4개 → team 4개 에이전트."""
     msg = (
-        "팀프로젝트) AI 스타트업 사업 계획서를 작성해줘. "
-        "1. 시장 조사, 2.기술 아키텍처 설계, 3. 투자 유치 전략, "
-        "4. 마케팅 계획을 각각 전문가가 작성해줘."
+        "(팀모드) AI 스타트업 사업 계획서를 작성해줘. "
+        "1. 시장 조사, 2. 기술 아키텍처 설계, 3. 투자 유치 전략, "
+        "4. 마케팅 계획을 작성해줘."
     )
     result = classify_message(msg)
     assert result.mode == "team"
@@ -343,8 +360,8 @@ def test_classify_startup_business_plan_is_team():
 
 
 def test_classify_five_items_capped():
-    """6개 번호 항목 → 최대 5개 에이전트."""
-    msg = "1. 조사 2. 설계 3. 구현 4. 테스트 5. 문서 6. 배포"
+    """헤더 + 6개 번호 항목 → 최대 5개 에이전트."""
+    msg = "(팀모드) 1. 조사 2. 설계 3. 구현 4. 테스트 5. 문서 6. 배포"
     result = classify_message(msg)
     assert result.mode == "team"
     assert len(result.agents) == 5

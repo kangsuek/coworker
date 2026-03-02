@@ -7,12 +7,15 @@
 """
 
 import pytest
+from sqlalchemy import select
 
+from app.models.db import AgentMessage, Run, UserMessage
 from app.services.session_service import (
     create_agent_message,
     create_run,
     create_session,
     create_user_message,
+    delete_session,
     get_agent_messages,
     get_session,
     get_session_with_messages,
@@ -202,3 +205,33 @@ async def test_get_agent_messages(db):
 
     messages = await get_agent_messages(db, run.id)
     assert len(messages) == 2
+
+
+# --- Bug Fix: 세션 삭제 시 자식 레코드 완전 삭제 검증 ---
+
+
+@pytest.mark.asyncio
+async def test_delete_session_removes_all_children(db):
+    """세션 삭제 시 runs, agent_messages, user_messages 모두 삭제됨 (Bug 1 + Bug 4 수정 검증)."""
+    sess = await create_session(db)
+    user_msg = await create_user_message(db, sess.id, "user", "테스트")
+    run = await create_run(db, sess.id, user_msg.id)
+    await create_agent_message(db, sess.id, run.id, "Coder-1", "Coder")
+
+    result = await delete_session(db, sess.id)
+    assert result is True
+
+    remaining_runs = (await db.execute(select(Run).where(Run.session_id == sess.id))).scalars().all()
+    remaining_msgs = (await db.execute(select(UserMessage).where(UserMessage.session_id == sess.id))).scalars().all()
+    remaining_agent = (await db.execute(select(AgentMessage).where(AgentMessage.session_id == sess.id))).scalars().all()
+
+    assert remaining_runs == [], "runs가 삭제되지 않음"
+    assert remaining_msgs == [], "user_messages가 삭제되지 않음"
+    assert remaining_agent == [], "agent_messages가 삭제되지 않음"
+
+
+@pytest.mark.asyncio
+async def test_delete_session_returns_false_for_nonexistent(db):
+    """없는 세션 삭제 → False 반환."""
+    result = await delete_session(db, "nonexistent-id")
+    assert result is False

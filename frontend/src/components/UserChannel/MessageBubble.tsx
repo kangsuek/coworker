@@ -23,10 +23,10 @@ export default function MessageBubble({ message }: Props) {
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-4`}>
       <div
-        className={`max-w-[80%] rounded-2xl px-4 py-3 ${
+        className={`max-w-[80%] rounded-sm px-4 py-3 ${
           isUser
-            ? 'bg-blue-600 text-white'
-            : 'bg-white border border-gray-200 text-gray-900 shadow-sm'
+            ? 'bg-emerald-900/20 border border-emerald-500/30 text-emerald-400 font-mono text-sm'
+            : 'bg-transparent border border-white/10 text-gray-300'
         }`}
       >
         {isUser ? (

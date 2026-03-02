@@ -119,8 +119,14 @@ function App() {
     session.createSession()
   }
 
+  const handleDeleteSession = (id: string) => {
+    setCurrentRunId(null)
+    setCurrentMode(null)
+    session.deleteSession(id)
+  }
+
   return (
-    <div className="flex h-screen bg-gray-50 text-gray-900 dark:bg-gray-900 dark:text-gray-100 overflow-hidden">
+    <div className="flex h-screen bg-[#0D0D0D] text-gray-300 dark:bg-[#0D0D0D] dark:text-gray-300 overflow-hidden font-sans">
       {sidebarOpen && (
         <>
           <div
@@ -132,7 +138,7 @@ function App() {
               currentSessionId={session.currentSession?.id ?? null}
               onSwitch={handleSwitchSession}
               onCreate={handleCreateSession}
-              onDeleteSession={session.deleteSession}
+              onDeleteSession={handleDeleteSession}
               theme={theme}
               onThemeToggle={toggleTheme}
               collapsed={sidebarCollapsed}
@@ -146,8 +152,8 @@ function App() {
 
       <div className="flex-1 flex min-w-0 min-h-0 overflow-hidden">
         {/* User Channel */}
-        <div className="flex-1 flex flex-col min-h-0 border-r border-gray-200 dark:border-gray-700 min-w-[200px] overflow-hidden">
-          <header className="h-8 px-4 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 flex items-center gap-2 shrink-0">
+        <div className="flex-1 flex flex-col min-h-0 border-r border-white/10 dark:border-white/10 min-w-[200px] overflow-hidden">
+          <header className="h-8 px-4 border-b border-white/10 dark:border-white/10 bg-[#141414] dark:bg-[#141414] flex items-center gap-2 shrink-0">
             <button
               onClick={() => setSidebarOpen(!sidebarOpen)}
               className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-gray-600 dark:text-gray-300"
@@ -155,7 +161,7 @@ function App() {
             >
               ☰
             </button>
-            <span className="font-medium truncate text-gray-800 dark:text-gray-200">
+            <span className="font-medium truncate text-gray-200 dark:text-gray-200">
               {session.currentSession?.title ?? '새 대화'}
             </span>
           </header>

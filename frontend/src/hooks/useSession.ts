@@ -20,6 +20,11 @@ export function useSession(): UseSessionResult {
   const [currentSession, setCurrentSession] = useState<Session | null>(null)
   const [messages, setMessages] = useState<UserMessage[]>([])
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Bug 3: currentSession?.id를 ref로 관리해 비동기 처리 중 클로저 캡처 문제 방지
+  const currentSessionIdRef = useRef<string | undefined>(currentSession?.id)
+  useEffect(() => {
+    currentSessionIdRef.current = currentSession?.id
+  })
 
   useEffect(() => {
     api.getSessions().then(setSessions).catch(() => {})
@@ -39,24 +44,29 @@ export function useSession(): UseSessionResult {
   }, [])
 
   const deleteSession = useCallback(async (id: string) => {
-    await api.deleteSession(id)
+    try {
+      await api.deleteSession(id)
+    } catch {
+      // 이미 없는 세션이면 목록만 갱신
+    }
     const list = await api.getSessions()
     setSessions(list)
-    if (currentSession?.id === id) {
+    // Bug 3: 클로저 캡처 대신 ref로 최신 currentSession?.id 참조
+    if (currentSessionIdRef.current === id) {
       if (list.length > 0) {
         const detail = await api.getSession(list[0].id)
         setCurrentSession(detail)
         setMessages(detail.messages)
       } else {
         const sess = await api.createSession()
-        setSessions((prev) => [sess, ...prev])
+        setSessions([sess])
         setCurrentSession(sess)
         setMessages([])
       }
     } else {
       setCurrentSession((prev) => (prev ? list.find((s) => s.id === prev.id) ?? prev : null))
     }
-  }, [currentSession?.id])
+  }, [])
 
   const addMessage = useCallback((msg: UserMessage) => {
     setMessages((prev) => [...prev, msg])
