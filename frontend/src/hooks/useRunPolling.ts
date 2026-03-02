@@ -10,11 +10,12 @@ const DEFAULT_STATE: RunStatus = {
   progress: null,
   response: null,
   mode: null,
+  model: null,
   agents: null,
 }
 
 export interface RunPollingCallbacks {
-  onDone?: (response: string, mode: 'solo' | 'team' | null) => void
+  onDone?: (response: string, mode: 'solo' | 'team' | null, model: string | null) => void
   onError?: (errorResponse: string | null) => void
   onCancelled?: () => void
 }
@@ -44,7 +45,7 @@ export function useRunPolling(
         if (TERMINAL_STATES.includes(data.status)) {
           stoppedRef.current = true
           if (data.status === 'done' && data.response != null) {
-            callbacksRef.current?.onDone?.(data.response, data.mode)
+            callbacksRef.current?.onDone?.(data.response, data.mode, data.model)
           } else if (data.status === 'error') {
             callbacksRef.current?.onError?.(data.response)
           } else if (data.status === 'cancelled') {

@@ -47,7 +47,11 @@ def _call_claude_sync(
     output_json: bool = kwargs.get("output_json", False)
     timeout: int = kwargs.get("timeout", settings.claude_cli_timeout)
 
+    model: str = kwargs.get("model", "")
+
     cmd = [settings.claude_cli_path, "-p", user_message, "--system-prompt", system_prompt]
+    if model:
+        cmd.extend(["--model", model])
     if output_json:
         cmd.extend(["--output-format", "json"])
     logger.debug("Claude CLI 시작: output_json=%s, timeout=%ds", output_json, timeout)
@@ -63,6 +67,7 @@ def _call_claude_sync(
         start_new_session=True,
         bufsize=1,
         env=child_env,
+        cwd="/tmp",  # CLAUDE.md 자동 로드 방지 (프로젝트 컨텍스트 오염 차단)
     )
 
     # Popen과 _current_proc 할당 사이에 cancel 요청이 들어온 경우 즉시 종료

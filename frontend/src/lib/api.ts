@@ -40,6 +40,11 @@ async function post<T>(path: string, body?: unknown): Promise<T> {
   return res.json()
 }
 
+async function del(path: string): Promise<void> {
+  const res = await fetchWithRetry(`${API_BASE}${path}`, { method: 'DELETE' })
+  if (!res.ok) throw new Error(`DELETE ${path} failed: ${res.status}`)
+}
+
 export const api = {
   chat: (req: ChatRequest) => post<ChatResponse>('/chat', req),
   getRunStatus: (runId: string) => get<RunStatus>(`/runs/${runId}`),
@@ -49,4 +54,5 @@ export const api = {
   getSessions: () => get<Session[]>('/sessions'),
   createSession: () => post<Session>('/sessions'),
   getSession: (id: string) => get<SessionDetail>(`/sessions/${id}`),
+  deleteSession: (id: string) => del(`/sessions/${id}`),
 }

@@ -1,18 +1,90 @@
-"""JSON 파싱 + 4단계 폴백 체인 (F-001a ~ F-001c).
+"""분류 서비스.
 
-0단계: CLI --output-format json 래퍼 처리 (result 필드 추출)
-1단계: json.loads() -> Pydantic 검증
-2단계: 중괄호 카운팅으로 JSON 블록 추출 -> 재파싱 (다중 중첩 지원)
-3단계: Solo 폴백
+규칙 기반 분류 (classify_message): CLI 호출 없이 즉시 결정.
+JSON 파싱 폴백 체인 (parse_classification): CLI 출력 파싱용 레거시 유지.
 """
 
 from __future__ import annotations
 
 import json
+import re
 
 from pydantic import ValidationError
 
-from app.models.schemas import ClassificationResult
+from app.models.schemas import AgentPlan, ClassificationResult
+
+# ── 규칙 기반 분류 ──────────────────────────────────────────────────────────
+
+_TEAM_TRIGGER_KEYWORDS = [
+    "각각", "전문가", "팀프로젝트", "팀 프로젝트", "단계별", "분야별",
+    "다단계", "여러 분야", "각 전문가",
+]
+
+# 역할별 키워드: 먼저 매칭된 역할로 결정 (순서가 우선순위)
+# Writer를 Planner보다 먼저 배치 — "마케팅 계획" 처럼 도메인 키워드가 "계획"보다 우선
+_ROLE_MAP: list[tuple[str, list[str]]] = [
+    ("Researcher", ["조사", "리서치", "분석", "시장", "경쟁사", "데이터 수집", "현황", "정보 수집"]),
+    ("Writer",     ["마케팅", "홍보", "카피", "콘텐츠", "글쓰기", "작성", "문서", "보고서"]),
+    ("Planner",    ["전략", "기획", "투자", "유치", "계획", "로드맵", "설계", "아키텍처"]),
+    ("Coder",      ["코드", "구현", "개발", "프로그래밍", "기술", "빌드"]),
+    ("Reviewer",   ["리뷰", "검토", "테스트", "감사", "검증", "평가", "피드백"]),
+]
+
+
+def _role_for_task(task: str) -> str:
+    """태스크 텍스트에서 적합한 Agent 역할 결정."""
+    for role, keywords in _ROLE_MAP:
+        if any(kw in task for kw in keywords):
+            return role
+    return "Researcher"
+
+
+def classify_message(user_message: str) -> ClassificationResult:
+    """규칙 기반 Solo/Team 분류. CLI 호출 없이 즉시 결정.
+
+    판정 기준:
+    - 번호 목록 3개 이상 → team
+    - 팀/전문가/각각 등 키워드 포함 → team
+    - 그 외 → solo
+    """
+    # 번호 목록 추출: "1. task", "1) task", "2.task" 형태
+    raw_items = re.findall(r"\d+[.)]\s*(.+?)(?=,?\s*\d+[.)]|$|\n)", user_message.strip())
+    numbered_items = [t.strip().strip(",").strip() for t in raw_items if t.strip()]
+
+    has_team_keyword = any(kw in user_message for kw in _TEAM_TRIGGER_KEYWORDS)
+    is_team = len(numbered_items) >= 3 or has_team_keyword
+
+    if not is_team:
+        return ClassificationResult(
+            mode="solo",
+            reason="단순 요청",
+            agents=[],
+            user_status_message=None,
+        )
+
+    # 번호 목록에서 에이전트 생성 (최대 5개)
+    agents: list[AgentPlan] = [
+        AgentPlan(role=_role_for_task(task), task=task)
+        for task in numbered_items[:5]
+    ]
+
+    if len(agents) < 2:
+        return ClassificationResult(
+            mode="solo",
+            reason="에이전트 구성 불가 (태스크 목록 부족)",
+            agents=[],
+            user_status_message=None,
+        )
+
+    return ClassificationResult(
+        mode="team",
+        reason=f"다단계 작업 ({len(agents)}개 전문 분야 필요)",
+        agents=agents,
+        user_status_message=None,
+    )
+
+
+# ── JSON 파싱 폴백 체인 (레거시 — CLI 출력 파싱용) ──────────────────────────
 
 
 def _extract_json_objects(text: str) -> list[str]:
@@ -39,13 +111,11 @@ def _extract_json_objects(text: str) -> list[str]:
 def parse_classification(raw_output: str) -> ClassificationResult:
     """CLI 출력을 ClassificationResult로 변환. 4단계 폴백."""
     # 0단계: CLI --output-format json 래퍼 처리
-    # {"type":"result","subtype":"success","result":"<escaped json 또는 dict>"}
     try:
         wrapper = json.loads(raw_output)
         if isinstance(wrapper, dict) and "result" in wrapper:
             result_val = wrapper["result"]
             if isinstance(result_val, str):
-                # result 필드가 escape된 JSON 문자열이면 raw_output을 교체
                 raw_output = result_val
             elif isinstance(result_val, dict):
                 try:

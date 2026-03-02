@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -21,6 +21,19 @@ async def create_session(db: AsyncSession) -> models.Session:
 async def get_session(db: AsyncSession, session_id: str) -> models.Session | None:
     """세션 ID로 조회. 없으면 None."""
     return await db.get(models.Session, session_id)
+
+
+async def delete_session(db: AsyncSession, session_id: str) -> bool:
+    """세션 및 관련 runs, agent_messages, user_messages 삭제. 없으면 False."""
+    session = await db.get(models.Session, session_id)
+    if session is None:
+        return False
+    await db.execute(delete(models.Run).where(models.Run.session_id == session_id))
+    await db.execute(delete(models.AgentMessage).where(models.AgentMessage.session_id == session_id))
+    await db.execute(delete(models.UserMessage).where(models.UserMessage.session_id == session_id))
+    await db.delete(session)
+    await db.commit()
+    return True
 
 
 async def list_sessions(

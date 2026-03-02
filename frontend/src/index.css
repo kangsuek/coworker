@@ -1,2 +1,6 @@
 @import "tailwindcss";
+
+/* class 기반 다크 모드: html.dark 시 dark: 변수 적용 */
+@custom-variant dark (&:where(.dark, .dark *));
+
 @import "highlight.js/styles/github.css";

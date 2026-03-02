@@ -30,6 +30,7 @@ export interface RunStatus {
   progress: string | null
   response: string | null
   mode: 'solo' | 'team' | null
+  model: string | null
   agents: AgentInfo[] | null
 }
 
@@ -59,6 +60,7 @@ export interface UserMessage {
   role: string
   content: string
   mode: string | null
+  model?: string | null
   created_at: string
 }
 

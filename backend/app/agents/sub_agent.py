@@ -20,6 +20,7 @@ class SubAgent:
         task: str,
         context: str | None,
         on_line: Callable[[str], None] | None,
+        model: str = "",
     ) -> str:
         """CLI 호출로 태스크 수행. context는 이전 Agent 결과."""
         prompt = self._build_prompt(task, context)
@@ -27,9 +28,10 @@ class SubAgent:
             system_prompt=self.system_prompt,
             user_message=prompt,
             on_line=on_line,
+            model=model,
         )
 
     def _build_prompt(self, task: str, context: str | None) -> str:
         if context:
-            return f"--- 이전 작업 결과 (참고용) ---\n{context}\n--- 끝 ---\n\n{task}"
+            return f"[이전 작업 결과]\n{context}\n[/이전 작업 결과]\n\n{task}"
         return task

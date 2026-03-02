@@ -28,14 +28,24 @@ const STATUS_CONFIG: Record<RunStatusType, StatusConfig> = {
 
 const ANIMATED_STATES: RunStatusType[] = ['thinking', 'solo', 'delegating', 'working', 'integrating']
 
+function shortModelName(model: string | null | undefined): string | null {
+  if (!model) return null
+  if (model.includes('haiku')) return 'Haiku'
+  if (model.includes('sonnet')) return 'Sonnet'
+  if (model.includes('opus')) return 'Opus'
+  return model
+}
+
 interface Props {
   status: RunStatusType
   progress?: string | null
+  model?: string | null
 }
 
-export default function StatusBadge({ status, progress }: Props) {
+export default function StatusBadge({ status, progress, model }: Props) {
   const config = STATUS_CONFIG[status]
   const isAnimated = ANIMATED_STATES.includes(status)
+  const modelLabel = shortModelName(model)
 
   return (
     <span
@@ -46,6 +56,7 @@ export default function StatusBadge({ status, progress }: Props) {
       />
       {config.label}
       {progress && ` (${progress})`}
+      {modelLabel && <span className="opacity-60">· {modelLabel}</span>}
     </span>
   )
 }

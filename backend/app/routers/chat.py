@@ -2,6 +2,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.reader import ReaderAgent
+from app.config import settings
 from app.models.db import Run, async_session, get_db
 from app.models.schemas import (
     AgentMessageOut,
@@ -56,7 +57,12 @@ async def get_run_status(run_id: str, db: AsyncSession = Depends(get_db)):
     run = await db.get(Run, run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found")
-    return RunStatus(status=run.status, response=run.response, mode=run.mode)
+    model = (
+        settings.solo_model or None if run.mode == "solo"
+        else settings.team_model or None if run.mode == "team"
+        else None
+    )
+    return RunStatus(status=run.status, response=run.response, mode=run.mode, model=model)
 
 
 @router.get("/runs/{run_id}/agent-messages", response_model=AgentMessagesResponse)

@@ -67,5 +67,5 @@ async def test_background_task_acquires_lock(db):
 
         await ReaderAgent(db).process_message(sess.id, "테스트", run.id)
 
-    # 분류 1회 + Solo 응답 1회 = 2회
+    # 분류(haiku) 1회 + Solo 응답 1회 = 2회
     assert len(lock_calls) >= 2

@@ -48,6 +48,24 @@ async def test_get_session_not_found(client):
 
 
 @pytest.mark.asyncio
+async def test_delete_session(client, db):
+    """세션 생성 → DELETE /api/sessions/{id} → 204, 목록에서 제거."""
+    sess = await create_session(db)
+    resp = await client.delete(f"/api/sessions/{sess.id}")
+    assert resp.status_code == 204
+    list_resp = await client.get("/api/sessions")
+    ids = [s["id"] for s in list_resp.json()]
+    assert sess.id not in ids
+
+
+@pytest.mark.asyncio
+async def test_delete_session_not_found(client):
+    """없는 세션 삭제 → 404."""
+    response = await client.delete("/api/sessions/nonexistent-id")
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
 async def test_list_sessions_pagination_limit(client):
     """?limit=2 → 최신 2개만 반환."""
     with patch("app.routers.chat._run_reader_agent", new_callable=AsyncMock):

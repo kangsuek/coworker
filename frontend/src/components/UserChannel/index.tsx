@@ -43,12 +43,13 @@ export default function UserChannel({
   })
 
   const runStatus = useRunPolling(runId, {
-    onDone: (response, mode) => {
+    onDone: (response, mode, model) => {
       onMessageAddedRef.current({
         id: crypto.randomUUID(),
         role: 'reader',
         content: response,
         mode,
+        model,
         created_at: new Date().toISOString(),
       })
       onModeChangeRef.current(mode)
@@ -80,6 +81,13 @@ export default function UserChannel({
       onRunChangeRef.current(null)
     },
   })
+
+  // 폴링 중 mode 감지 시 즉시 알림 (Agent Channel 폴링 활성화용)
+  useEffect(() => {
+    if (runStatus.mode) {
+      onModeChangeRef.current(runStatus.mode)
+    }
+  }, [runStatus.mode])
 
   // 자동 스크롤
   useEffect(() => {
@@ -134,9 +142,9 @@ export default function UserChannel({
 
   return (
     <>
-      <div className="flex-1 overflow-y-auto p-4">
+      <div className="flex-1 min-h-0 overflow-y-auto p-4">
         {messages.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full text-gray-400">
+          <div className="flex flex-col items-center justify-center h-full text-gray-400 dark:text-gray-500">
             <p className="text-lg mb-1">무엇이든 물어보세요</p>
             <p className="text-sm">복잡한 작업은 Team 모드로 자동 전환됩니다</p>
           </div>
@@ -146,15 +154,15 @@ export default function UserChannel({
 
         {runId && (
           <div className="flex justify-start mb-4">
-            <StatusBadge status={runStatus.status} progress={runStatus.progress} />
+            <StatusBadge status={runStatus.status} progress={runStatus.progress} model={runStatus.model} />
           </div>
         )}
 
         <div ref={messagesEndRef} />
       </div>
 
-      <div className="p-4 border-t border-gray-200 bg-white shrink-0">
-        <div className="flex gap-2">
+      <div className="h-10 flex items-center px-3 py-1.5 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shrink-0">
+        <div className="flex gap-1.5 w-full items-center">
           <input
             type="text"
             value={input}
@@ -166,14 +174,14 @@ export default function UserChannel({
               }
             }}
             placeholder="메시지를 입력하세요..."
-            className="flex-1 px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm disabled:bg-gray-50"
+            className="flex-1 min-h-0 px-3 py-1 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm text-gray-900 dark:text-gray-100 bg-white dark:bg-gray-700 placeholder-gray-500 dark:placeholder-gray-400 disabled:bg-gray-50 dark:disabled:bg-gray-600"
             disabled={isRunning}
           />
           {/* 6-5: 실행 중이면 취소 버튼, 아니면 전송 버튼 */}
           {isRunning ? (
             <button
               onClick={handleCancel}
-              className="px-5 py-2.5 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors text-sm font-medium"
+              className="px-3 py-1 bg-red-500 text-white rounded-lg hover:bg-red-600 dark:hover:bg-red-600 transition-colors text-sm font-medium"
             >
               취소 ✕
             </button>
@@ -181,7 +189,7 @@ export default function UserChannel({
             <button
               onClick={handleSend}
               disabled={!input.trim()}
-              className="px-5 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 text-sm font-medium"
+              className="px-3 py-1 bg-blue-600 dark:bg-blue-500 text-white rounded-lg hover:bg-blue-700 dark:hover:bg-blue-600 transition-colors disabled:opacity-50 text-sm font-medium"
             >
               전송
             </button>

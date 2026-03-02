@@ -17,7 +17,7 @@ from app.agents.presets import coder, planner, researcher, reviewer, writer
 from app.agents.sub_agent import SubAgent
 from app.config import settings
 from app.models.schemas import AgentPlan, ClassificationResult
-from app.services.classification import parse_classification
+from app.services.classification import classify_message, parse_classification
 from app.services.cli_service import LineBufferFlusher, call_claude_streaming, execute_with_lock
 from app.services.session_service import (
     create_agent_message,
@@ -31,12 +31,18 @@ logger = logging.getLogger(__name__)
 
 CONTEXT_CHAR_LIMIT = int(os.getenv("CONTEXT_CHAR_LIMIT", "3000"))
 
+_AGENT_COMMON_INSTRUCTION = (
+    "\n\n중요: 당신은 팀 프로젝트에서 독립적으로 작업하는 전문가입니다. "
+    "절대로 추가 정보를 요청하거나 사용자와 대화하려 하지 마세요. "
+    "주어진 정보를 최대한 활용하여 담당 태스크를 즉시 완료하고 완성된 결과물만 제공하세요."
+)
+
 _PRESET_MAP = {
-    "Researcher": researcher.SYSTEM_PROMPT,
-    "Coder": coder.SYSTEM_PROMPT,
-    "Reviewer": reviewer.SYSTEM_PROMPT,
-    "Writer": writer.SYSTEM_PROMPT,
-    "Planner": planner.SYSTEM_PROMPT,
+    "Researcher": researcher.SYSTEM_PROMPT + _AGENT_COMMON_INSTRUCTION,
+    "Coder": coder.SYSTEM_PROMPT + _AGENT_COMMON_INSTRUCTION,
+    "Reviewer": reviewer.SYSTEM_PROMPT + _AGENT_COMMON_INSTRUCTION,
+    "Writer": writer.SYSTEM_PROMPT + _AGENT_COMMON_INSTRUCTION,
+    "Planner": planner.SYSTEM_PROMPT + _AGENT_COMMON_INSTRUCTION,
 }
 
 _INTEGRATE_SYSTEM_PROMPT = (
@@ -123,18 +129,34 @@ class ReaderAgent:
             await update_run_status(self.db, run_id, "error", response=error_msg)
 
     async def _classify(self, user_message: str) -> ClassificationResult:
-        """CLI로 Solo/Team 분류."""
+        """Solo/Team 분류: 규칙 기반 1차 판정 → 모호하면 haiku CLI 호출."""
+        # 1차: 규칙 기반 (명확한 경우 CLI 호출 생략)
+        rule_result = classify_message(user_message)
+        if rule_result.mode == "team":
+            logger.info("_classify (rule-based): mode=team agents=%s", rule_result.agents)
+            return rule_result
+
+        # 2차: haiku CLI 호출로 최종 판정 (solo 또는 모호한 경우)
         raw = await execute_with_lock(
             call_claude_streaming(
-                self.CLASSIFY_SYSTEM_PROMPT, user_message, output_json=True
+                self.CLASSIFY_SYSTEM_PROMPT,
+                user_message,
+                output_json=True,
+                model=settings.solo_model,
             )
         )
-        return parse_classification(raw)
+        result = parse_classification(raw)
+        logger.info("_classify (haiku): mode=%s reason=%s agents=%s", result.mode, result.reason, result.agents)
+        return result
 
     async def _solo_respond(self, user_message: str) -> str:
         """Solo 모드 응답 생성."""
         return await execute_with_lock(
-            call_claude_streaming(self.SOLO_SYSTEM_PROMPT, user_message)
+            call_claude_streaming(
+                self.SOLO_SYSTEM_PROMPT,
+                user_message,
+                model=settings.solo_model,
+            )
         )
 
     async def _team_execute(
@@ -191,9 +213,15 @@ class ReaderAgent:
             def on_line(line: str) -> None:
                 flusher.append(line)
 
+            # 원본 사용자 요청을 포함하여 Sub-Agent가 전체 맥락을 파악하도록 함
+            full_task = (
+                f"[전체 프로젝트 요청]\n{user_message}\n\n"
+                f"[당신의 담당 태스크]\n{agent_plan.task}"
+            )
+
             try:
                 result = await execute_with_lock(
-                    agent.execute(agent_plan.task, context, on_line)
+                    agent.execute(full_task, context, on_line, model=settings.team_model)
                 )
             except Exception:
                 flusher.stop()
@@ -226,7 +254,11 @@ class ReaderAgent:
         combined = "\n\n".join(parts)
         prompt = f"사용자 요청: {user_message}\n\n{combined}"
         return await execute_with_lock(
-            call_claude_streaming(_INTEGRATE_SYSTEM_PROMPT, prompt)
+            call_claude_streaming(
+                _INTEGRATE_SYSTEM_PROMPT,
+                prompt,
+                model=settings.team_model,
+            )
         )
 
     async def _assemble_context(self, results: dict[str, str]) -> str | None:
@@ -249,5 +281,6 @@ class ReaderAgent:
                 _SUMMARIZE_SYSTEM_PROMPT,
                 f"다음은 {agent_name}의 작업 결과입니다. 요약해주세요:\n\n{content}",
                 on_line=None,
+                model=settings.team_model,
             )
         )

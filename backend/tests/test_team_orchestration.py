@@ -80,7 +80,7 @@ async def test_team_execute_runs_agents_sequentially(db):
         user_status_message=None,
     )
 
-    async def fake_execute(task, context, on_line):
+    async def fake_execute(task, context, on_line, model=""):
         call_order.append(task)
         return f"{task} 결과"
 

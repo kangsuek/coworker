@@ -31,26 +31,21 @@ async def test_process_message_logs_error_on_exception(db):
 
 @pytest.mark.asyncio
 async def test_classify_returns_solo(db):
-    """call_claude_streaming mock → solo 분류 결과 반환."""
+    """단순 메시지 → solo 분류 (haiku CLI mock)."""
     with patch("app.agents.reader.call_claude_streaming", new_callable=AsyncMock) as mock_cli:
         mock_cli.return_value = '{"mode":"solo","reason":"간단한 질문","agents":[]}'
-        agent = ReaderAgent(db)
-        result = await agent._classify("안녕하세요")
+        result = await ReaderAgent(db)._classify("안녕하세요")
     assert result.mode == "solo"
 
 
 @pytest.mark.asyncio
 async def test_classify_returns_team(db):
-    """call_claude_streaming mock → team 분류 결과 반환."""
-    with patch("app.agents.reader.call_claude_streaming", new_callable=AsyncMock) as mock_cli:
-        mock_cli.return_value = (
-            '{"mode":"team","reason":"복잡한 작업",'
-            '"agents":[{"role":"Researcher","task":"조사"}]}'
-        )
-        agent = ReaderAgent(db)
-        result = await agent._classify("복잡한 프로젝트를 개발해주세요")
+    """번호 목록 3개 이상 → 규칙 기반으로 즉시 team 반환 (CLI 호출 없음)."""
+    result = await ReaderAgent(db)._classify(
+        "1. 시장 조사, 2. 기술 설계, 3. 마케팅 전략을 각각 작성해줘."
+    )
     assert result.mode == "team"
-    assert len(result.agents) == 1
+    assert len(result.agents) == 3
 
 
 @pytest.mark.asyncio
@@ -71,6 +66,7 @@ async def test_process_message_solo_flow(db):
     run = await create_run(db, sess.id, msg.id)
 
     with patch("app.agents.reader.call_claude_streaming", new_callable=AsyncMock) as mock_cli:
+        # 분류 CLI(haiku) 1회 + solo 응답 1회
         mock_cli.side_effect = [
             '{"mode":"solo","reason":"간단","agents":[]}',
             "안녕하세요!",

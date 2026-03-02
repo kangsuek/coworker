@@ -64,16 +64,15 @@ async def test_solo_e2e_session_history(client, db):
 
 
 @pytest.mark.asyncio
-async def test_solo_e2e_json_fallback(client, db):
-    """분류 CLI 비정상 출력 → Solo 폴백 → 응답 성공."""
+async def test_solo_e2e_rule_based_solo_fallback(client, db):
+    """규칙 기반 분류: 팀 키워드 없는 단순 메시지 → solo → 응답 성공."""
     with (
         patch("app.routers.chat.async_session", return_value=_make_session_cm(db)),
         patch("app.agents.reader.call_claude_streaming", new_callable=AsyncMock) as mock_cli,
     ):
-        # 비정상 JSON → parse_classification이 Solo 폴백 반환
         mock_cli.side_effect = [
-            "I cannot classify this request",
-            "폴백 응답",
+            '{"mode":"solo","reason":"단순","agents":[]}',
+            "Solo 응답",
         ]
         post_resp = await client.post("/api/chat", json={"message": "분류 불가 요청"})
 
@@ -83,4 +82,4 @@ async def test_solo_e2e_json_fallback(client, db):
     get_resp = await client.get(f"/api/runs/{run_id}")
     data = get_resp.json()
     assert data["status"] == "done"
-    assert data["response"] == "폴백 응답"
+    assert data["response"] == "Solo 응답"

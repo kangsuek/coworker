@@ -9,6 +9,7 @@ export interface UseSessionResult {
   messages: UserMessage[]
   switchSession: (id: string) => Promise<void>
   createSession: () => Promise<void>
+  deleteSession: (id: string) => Promise<void>
   addMessage: (msg: UserMessage) => void
   setCurrentSessionFromChat: (sessionId: string) => void
   refreshSessions: () => Promise<void>
@@ -36,6 +37,26 @@ export function useSession(): UseSessionResult {
     setCurrentSession(sess)
     setMessages([])
   }, [])
+
+  const deleteSession = useCallback(async (id: string) => {
+    await api.deleteSession(id)
+    const list = await api.getSessions()
+    setSessions(list)
+    if (currentSession?.id === id) {
+      if (list.length > 0) {
+        const detail = await api.getSession(list[0].id)
+        setCurrentSession(detail)
+        setMessages(detail.messages)
+      } else {
+        const sess = await api.createSession()
+        setSessions((prev) => [sess, ...prev])
+        setCurrentSession(sess)
+        setMessages([])
+      }
+    } else {
+      setCurrentSession((prev) => (prev ? list.find((s) => s.id === prev.id) ?? prev : null))
+    }
+  }, [currentSession?.id])
 
   const addMessage = useCallback((msg: UserMessage) => {
     setMessages((prev) => [...prev, msg])
@@ -83,6 +104,7 @@ export function useSession(): UseSessionResult {
     messages,
     switchSession,
     createSession,
+    deleteSession,
     addMessage,
     setCurrentSessionFromChat,
     refreshSessions,

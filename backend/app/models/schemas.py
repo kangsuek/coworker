@@ -1,7 +1,17 @@
-from datetime import datetime
-from typing import Literal
+from datetime import UTC, datetime
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, BeforeValidator
+
+
+def _ensure_utc(dt: datetime) -> datetime:
+    """SQLite에서 읽은 naive datetime을 UTC로 간주해 타임존을 붙인다. JSON 직렬화 시 Z 포함 → 프론트에서 로컬 시각으로 정확히 변환."""
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=UTC)
+    return dt
+
+
+UTCDatetime = Annotated[datetime, BeforeValidator(_ensure_utc)]
 
 # --- 요청 모델 ---
 
@@ -41,6 +51,7 @@ class RunStatus(BaseModel):
     progress: str | None = None
     response: str | None = None
     mode: Literal["solo", "team"] | None = None
+    model: str | None = None
     agents: list[AgentInfo] | None = None
 
 
@@ -50,7 +61,7 @@ class AgentMessageOut(BaseModel):
     role_preset: str
     content: str
     status: Literal["working", "done", "error", "cancelled"]
-    created_at: datetime
+    created_at: UTCDatetime
 
 
 class AgentMessagesResponse(BaseModel):
@@ -64,8 +75,8 @@ class AgentMessagesResponse(BaseModel):
 class SessionOut(BaseModel):
     id: str
     title: str | None
-    created_at: datetime
-    updated_at: datetime
+    created_at: UTCDatetime
+    updated_at: UTCDatetime
 
 
 class UserMessageOut(BaseModel):
@@ -73,14 +84,14 @@ class UserMessageOut(BaseModel):
     role: str
     content: str
     mode: str | None
-    created_at: datetime
+    created_at: UTCDatetime
 
 
 class SessionDetail(BaseModel):
     id: str
     title: str | None
-    created_at: datetime
-    updated_at: datetime
+    created_at: UTCDatetime
+    updated_at: UTCDatetime
     messages: list[UserMessageOut]
 
 

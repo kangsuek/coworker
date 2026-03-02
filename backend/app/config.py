@@ -14,6 +14,10 @@ class Settings(BaseSettings):
     claude_cli_path: str = "claude"
     claude_cli_timeout: int = 120
 
+    # 모델 설정 (빈 문자열 = CLI 기본값 사용)
+    solo_model: str = ""   # 분류 + Solo 응답용 (예: claude-haiku-4-5-20251001)
+    team_model: str = ""   # Team 에이전트 + 통합용 (예: claude-sonnet-4-6)
+
     # Agent
     max_sub_agents: int = 5
 

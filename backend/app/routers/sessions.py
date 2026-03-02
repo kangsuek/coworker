@@ -31,6 +31,14 @@ async def create_new_session(db: AsyncSession = Depends(get_db)):
     )
 
 
+@router.delete("/sessions/{session_id}", status_code=204)
+async def delete_session(session_id: str, db: AsyncSession = Depends(get_db)):
+    """세션 삭제 (관련 메시지·runs 포함)."""
+    deleted = await session_service.delete_session(db, session_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+
 @router.get("/sessions/{session_id}", response_model=SessionDetail)
 async def get_session(session_id: str, db: AsyncSession = Depends(get_db)):
     """세션 상세 조회 (대화 히스토리 포함)."""
