@@ -41,6 +41,7 @@ def _call_gemini_sync(
         cmd,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
+        stdin=subprocess.DEVNULL,
         text=True,
         start_new_session=True,
         bufsize=1,
@@ -59,6 +60,10 @@ def _call_gemini_sync(
     lines: list[str] = []
     try:
         for line in proc.stdout:
+            # Gemini CLI의 불필요한 시스템 메시지 필터링
+            if line.startswith("Loaded cached credentials") or line.startswith("[WARNING] --raw-output"):
+                continue
+            
             lines.append(line)
             if on_line:
                 on_line(line)

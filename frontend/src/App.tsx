@@ -20,10 +20,10 @@ const CLAUDE_MODELS = [
 
 const GEMINI_MODELS = [
   { value: '', label: '기본값' },
-  { value: 'gemini‑3‑pro‑preview', label: 'Gemini3 pro' },
-  { value: 'gemini‑3‑flash‑preview', label: 'Gemini3 flash' },
-  { value: 'gemini‑2.5‑pro', label: 'Gemini 2.5 Pro' },
-  { value: 'gemini‑2.5‑flash', label: 'Gemini 2.5 Flash' },
+  { value: 'gemini-3-pro-preview', label: 'Gemini3 pro' },
+  { value: 'gemini-3-flash-preview', label: 'Gemini3 flash' },
+  { value: 'gemini-2.5-pro', label: 'Gemini2.5 Pro' },
+  { value: 'gemini-2.5-flash', label: 'Gemini2.5 Flash' },
 ]
 
 function getModelOptions(provider: string, currentValue: string): { value: string; label: string }[] {
@@ -98,7 +98,11 @@ function App() {
   }, [layout.sidebar, layout.agent])
 
   useEffect(() => {
-    document.documentElement.classList.toggle('dark', theme === 'dark')
+    if (theme === 'dark') {
+      document.documentElement.classList.add('dark')
+    } else {
+      document.documentElement.classList.remove('dark')
+    }
     localStorage.setItem(THEME_KEY, theme)
   }, [theme])
 
@@ -160,7 +164,7 @@ function App() {
   }
 
   return (
-    <div className="flex h-screen bg-[#0D0D0D] text-gray-300 dark:bg-[#0D0D0D] dark:text-gray-300 overflow-hidden font-sans">
+    <div className="flex h-screen bg-gray-50 text-gray-900 dark:bg-[#0D0D0D] dark:text-gray-300 overflow-hidden font-sans">
       {sidebarOpen && (
         <>
           <div
@@ -186,8 +190,8 @@ function App() {
 
       <div className="flex-1 flex min-w-0 min-h-0 overflow-hidden">
         {/* User Channel */}
-        <div className="flex-1 flex flex-col min-h-0 border-r border-white/10 dark:border-white/10 min-w-[200px] overflow-hidden">
-          <header className="h-8 px-4 border-b border-white/10 dark:border-white/10 bg-[#141414] dark:bg-[#141414] flex items-center justify-between shrink-0">
+        <div className="flex-1 flex flex-col min-h-0 border-r border-gray-200 dark:border-white/10 min-w-[200px] overflow-hidden">
+          <header className="h-8 px-4 border-b border-gray-200 dark:border-white/10 bg-white dark:bg-[#141414] flex items-center justify-between shrink-0">
             <div className="flex items-center gap-2">
               <button
                 onClick={() => setSidebarOpen(!sidebarOpen)}
@@ -196,7 +200,7 @@ function App() {
               >
                 ☰
               </button>
-              <span className="font-medium truncate text-gray-200 dark:text-gray-200">
+              <span className="font-medium truncate text-gray-800 dark:text-gray-200">
                 {session.currentSession?.title ?? '새 대화'}
               </span>
             </div>
@@ -208,7 +212,7 @@ function App() {
                   setLlmProvider(e.target.value)
                   setLlmModel('') // Provide 변경 시 모델 초기화
                 }}
-                className="bg-[#242424] border border-white/10 text-gray-200 rounded px-2 py-0.5 focus:outline-none"
+                className="bg-gray-100 border border-gray-300 text-gray-800 dark:bg-[#242424] dark:border-white/10 dark:text-gray-200 rounded px-2 py-0.5 focus:outline-none"
               >
                 <option value="claude-cli">Claude CLI</option>
                 <option value="gemini-cli">Gemini CLI</option>
@@ -218,7 +222,7 @@ function App() {
                 value={llmModel}
                 onChange={(e) => setLlmModel(e.target.value)}
                 title="모델 선택"
-                className="bg-[#242424] border border-white/10 text-gray-200 rounded px-2 py-0.5 min-w-[140px] focus:outline-none"
+                className="bg-gray-100 border border-gray-300 text-gray-800 dark:bg-[#242424] dark:border-white/10 dark:text-gray-200 rounded px-2 py-0.5 min-w-[140px] focus:outline-none"
               >
                 {getModelOptions(llmProvider, llmModel).map((opt) => (
                   <option key={opt.value || '__default__'} value={opt.value}>
