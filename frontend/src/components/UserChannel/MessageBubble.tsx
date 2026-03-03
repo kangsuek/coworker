@@ -1,7 +1,7 @@
 import ReactMarkdown from 'react-markdown'
 import rehypeHighlight from 'rehype-highlight'
 
-import type { UserMessage } from '../../types/api'
+import type { TimingInfo, UserMessage } from '../../types/api'
 
 function shortModelName(model: string | null | undefined): string | null {
   if (!model) return null
@@ -9,6 +9,18 @@ function shortModelName(model: string | null | undefined): string | null {
   if (model.includes('sonnet')) return 'Sonnet'
   if (model.includes('opus')) return 'Opus'
   return model
+}
+
+function formatTiming(timing: TimingInfo | null | undefined): string | null {
+  if (!timing?.finished_at || !timing?.thinking_started_at) return null
+  const total = (Date.parse(timing.finished_at) - Date.parse(timing.thinking_started_at)) / 1000
+  if (timing.cli_started_at) {
+    const classify =
+      (Date.parse(timing.cli_started_at) - Date.parse(timing.thinking_started_at)) / 1000
+    const cli = (Date.parse(timing.finished_at) - Date.parse(timing.cli_started_at)) / 1000
+    return `총 ${total.toFixed(1)}s (분류: ${classify.toFixed(1)}s · CLI: ${cli.toFixed(1)}s)`
+  }
+  return `총 ${total.toFixed(1)}s`
 }
 
 interface Props {
@@ -19,6 +31,7 @@ export default function MessageBubble({ message }: Props) {
   const isUser = message.role === 'user'
   const modelLabel = shortModelName(message.model)
   const modeLabel = message.mode === 'solo' ? 'Solo' : message.mode === 'team' ? 'Team' : null
+  const timingLabel = formatTiming(message.timing)
 
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-4`}>
@@ -53,11 +66,13 @@ export default function MessageBubble({ message }: Props) {
                 {message.content}
               </ReactMarkdown>
             </div>
-            {(modeLabel || modelLabel) && (
+            {(modeLabel || modelLabel || timingLabel) && (
               <div className="mt-1.5 flex items-center gap-1 text-xs text-gray-400">
                 {modeLabel && <span>{modeLabel}</span>}
                 {modeLabel && modelLabel && <span>&middot;</span>}
                 {modelLabel && <span>{modelLabel}</span>}
+                {timingLabel && (modelLabel || modeLabel) && <span>&middot;</span>}
+                {timingLabel && <span className="opacity-50">{timingLabel}</span>}
               </div>
             )}
           </>

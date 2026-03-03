@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from app.agents.reader import ReaderAgent
+from app.agents.reader import ReaderAgent, _build_conversation_prompt
 from app.models.db import Run
 from app.services.session_service import create_run, create_session, create_user_message
 
@@ -91,3 +91,65 @@ async def test_process_message_error_handling(db):
 
     updated_run = await db.get(Run, run.id)
     assert updated_run.status == "error"
+
+
+# ── 대화 이력 프롬프트 조립 테스트 ──────────────────────────────────────────
+
+
+def test_build_conversation_prompt_no_history():
+    """이력 없으면 user_message 그대로 반환."""
+    result = _build_conversation_prompt("안녕하세요", [])
+    assert result == "안녕하세요"
+
+
+def test_build_conversation_prompt_with_history():
+    """이전 대화 이력이 있으면 [이전 대화] 섹션이 포함된다."""
+
+    class FakeMsg:
+        def __init__(self, role, content):
+            self.role = role
+            self.content = content
+
+    history = [
+        FakeMsg("user", "파이썬이 뭐야?"),
+        FakeMsg("reader", "파이썬은 프로그래밍 언어입니다."),
+    ]
+    result = _build_conversation_prompt("더 자세히 설명해줘", history)
+
+    assert "[이전 대화]" in result
+    assert "사용자: 파이썬이 뭐야?" in result
+    assert "어시스턴트: 파이썬은 프로그래밍 언어입니다." in result
+    assert "[현재 질문]" in result
+    assert "더 자세히 설명해줘" in result
+
+
+@pytest.mark.asyncio
+async def test_conversation_history_passed_to_cli(db):
+    """2턴 대화 후 3번째 메시지 전송 시 CLI에 이전 대화 이력이 포함된다."""
+    sess = await create_session(db)
+
+    # 1번째 대화 (user + reader 메시지 저장)
+    await create_user_message(db, sess.id, "user", "파이썬이 뭐야?")
+    await create_user_message(db, sess.id, "reader", "파이썬은 프로그래밍 언어입니다.", mode="solo")
+
+    # 2번째 메시지 전송
+    msg2 = await create_user_message(db, sess.id, "user", "더 자세히 설명해줘")
+    run = await create_run(db, sess.id, msg2.id)
+
+    captured_prompt: list[str] = []
+
+    async def fake_streaming(system_prompt, prompt, **kwargs):
+        captured_prompt.append(prompt)
+        return "자세한 설명입니다."
+
+    with patch("app.agents.reader.call_claude_streaming", side_effect=fake_streaming):
+        await ReaderAgent(db).process_message(sess.id, "더 자세히 설명해줘", run.id)
+
+    assert len(captured_prompt) == 1
+    prompt = captured_prompt[0]
+    assert "파이썬이 뭐야?" in prompt, "이전 user 메시지가 프롬프트에 포함되어야 함"
+    assert "파이썬은 프로그래밍 언어입니다." in prompt, \
+        "이전 reader 메시지가 프롬프트에 포함되어야 함"
+    assert "더 자세히 설명해줘" in prompt, "현재 질문이 프롬프트에 포함되어야 함"
+    # 현재 메시지는 이력 섹션이 아닌 [현재 질문] 섹션에 있어야 함
+    assert "[현재 질문]" in prompt

@@ -25,7 +25,9 @@ async def test_team_e2e_full_flow(client):
 
     with (
         patch("app.agents.reader.execute_with_lock") as mock_lock,
-        patch.object(ReaderAgent, "_classify", new_callable=AsyncMock, return_value=team_classification),
+        patch.object(
+            ReaderAgent, "_classify", new_callable=AsyncMock, return_value=team_classification
+        ),
         patch("app.agents.reader.create_agent_message", new_callable=AsyncMock) as mock_create_am,
         patch("app.agents.reader.update_agent_message_content", new_callable=AsyncMock),
         patch("app.agents.reader.update_agent_message_status", new_callable=AsyncMock),

@@ -94,6 +94,8 @@ class Run(Base):
     status: Mapped[str] = mapped_column(Text, default="queued")
     response: Mapped[str | None] = mapped_column(Text, default=None)
     agent_count: Mapped[int | None] = mapped_column(default=None)
+    thinking_started_at: Mapped[datetime | None] = mapped_column(default=None)
+    cli_started_at: Mapped[datetime | None] = mapped_column(default=None)
     started_at: Mapped[datetime | None] = mapped_column(default=None)
     finished_at: Mapped[datetime | None] = mapped_column(default=None)
 

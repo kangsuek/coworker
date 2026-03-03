@@ -1,4 +1,6 @@
-import type { RunStatusType } from '../../types/api'
+import { useEffect, useRef, useState } from 'react'
+
+import type { RunStatusType, TimingInfo } from '../../types/api'
 
 interface StatusConfig {
   label: string
@@ -40,12 +42,40 @@ interface Props {
   status: RunStatusType
   progress?: string | null
   model?: string | null
+  timing?: TimingInfo | null
 }
 
-export default function StatusBadge({ status, progress, model }: Props) {
+export default function StatusBadge({ status, progress, model, timing }: Props) {
   const config = STATUS_CONFIG[status]
   const isAnimated = ANIMATED_STATES.includes(status)
   const modelLabel = shortModelName(model)
+  const [elapsedSec, setElapsedSec] = useState<number | null>(null)
+  const startRefTime = useRef<Date | null>(null)
+
+  useEffect(() => {
+    let startDate: Date | null = null
+    if (status === 'thinking' && timing?.thinking_started_at) {
+      startDate = new Date(timing.thinking_started_at)
+    } else if (status === 'solo' && timing?.cli_started_at) {
+      startDate = new Date(timing.cli_started_at)
+    }
+
+    startRefTime.current = startDate
+
+    if (!startDate) {
+      setElapsedSec(null)
+      return
+    }
+
+    const update = () => {
+      if (startRefTime.current) {
+        setElapsedSec((Date.now() - startRefTime.current.getTime()) / 1000)
+      }
+    }
+    update()
+    const id = setInterval(update, 100)
+    return () => clearInterval(id)
+  }, [status, timing?.thinking_started_at, timing?.cli_started_at])
 
   return (
     <span
@@ -56,6 +86,9 @@ export default function StatusBadge({ status, progress, model }: Props) {
       />
       {config.label}
       {progress && ` (${progress})`}
+      {elapsedSec !== null && (
+        <span className="opacity-70">{elapsedSec.toFixed(1)}s</span>
+      )}
       {modelLabel && <span className="opacity-60">· {modelLabel}</span>}
     </span>
   )

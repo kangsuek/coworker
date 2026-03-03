@@ -221,9 +221,15 @@ async def test_delete_session_removes_all_children(db):
     result = await delete_session(db, sess.id)
     assert result is True
 
-    remaining_runs = (await db.execute(select(Run).where(Run.session_id == sess.id))).scalars().all()
-    remaining_msgs = (await db.execute(select(UserMessage).where(UserMessage.session_id == sess.id))).scalars().all()
-    remaining_agent = (await db.execute(select(AgentMessage).where(AgentMessage.session_id == sess.id))).scalars().all()
+    remaining_runs = (
+        await db.execute(select(Run).where(Run.session_id == sess.id))
+    ).scalars().all()
+    remaining_msgs = (
+        await db.execute(select(UserMessage).where(UserMessage.session_id == sess.id))
+    ).scalars().all()
+    remaining_agent = (
+        await db.execute(select(AgentMessage).where(AgentMessage.session_id == sess.id))
+    ).scalars().all()
 
     assert remaining_runs == [], "runs가 삭제되지 않음"
     assert remaining_msgs == [], "user_messages가 삭제되지 않음"

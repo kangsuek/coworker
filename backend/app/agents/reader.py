@@ -9,20 +9,22 @@ import json
 import logging
 import os
 import sqlite3
+from datetime import UTC, datetime
 
 from sqlalchemy import text as sql_text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import db as models
 from app.agents.presets import coder, planner, researcher, reviewer, writer
 from app.agents.sub_agent import SubAgent
 from app.config import settings
+from app.models import db as models
 from app.models.schemas import AgentPlan, ClassificationResult
 from app.services.classification import classify_message
 from app.services.cli_service import LineBufferFlusher, call_claude_streaming, execute_with_lock
 from app.services.session_service import (
     create_agent_message,
     create_user_message,
+    get_recent_messages,
     update_agent_message_content,
     update_agent_message_status,
     update_run_status,
@@ -31,6 +33,25 @@ from app.services.session_service import (
 logger = logging.getLogger(__name__)
 
 CONTEXT_CHAR_LIMIT = int(os.getenv("CONTEXT_CHAR_LIMIT", "3000"))
+_HISTORY_MSG_LIMIT = 20  # 최근 20개 메시지 (약 10턴)
+
+
+def _build_conversation_prompt(user_message: str, history: list) -> str:
+    """이전 대화 이력을 포함한 프롬프트 생성.
+
+    history가 비어 있으면 user_message를 그대로 반환.
+    role='user' → '사용자', role='reader' → '어시스턴트'로 표기.
+    """
+    if not history:
+        return user_message
+
+    lines = ["[이전 대화]"]
+    for msg in history:
+        role_label = "사용자" if msg.role == "user" else "어시스턴트"
+        lines.append(f"{role_label}: {msg.content}")
+    lines.append("")
+    lines.append(f"[현재 질문]\n{user_message}")
+    return "\n".join(lines)
 
 _AGENT_COMMON_INSTRUCTION = (
     "\n\n중요: 당신은 팀 프로젝트에서 독립적으로 작업하는 전문가입니다. "
@@ -72,18 +93,34 @@ class ReaderAgent:
     ) -> None:
         """메시지 처리: 분류 → Solo/Team 실행."""
         try:
-            await update_run_status(self.db, run_id, "thinking")
+            # 현재 run의 user_message_id를 찾아 대화 이력에서 제외
+            run = await self.db.get(models.Run, run_id)
+            current_msg_id = run.user_message_id if run else None
+
+            await update_run_status(
+                self.db, run_id, "thinking", thinking_started_at=datetime.now(UTC)
+            )
             result = await self._classify(user_message)
 
             if result.mode == "solo":
-                await update_run_status(self.db, run_id, "solo")
-                text = await self._solo_respond(user_message)
+                await update_run_status(
+                    self.db, run_id, "solo", cli_started_at=datetime.now(UTC)
+                )
+                history = await get_recent_messages(
+                    self.db, session_id,
+                    limit=_HISTORY_MSG_LIMIT,
+                    exclude_id=current_msg_id,
+                )
+                text = await self._solo_respond(user_message, history)
                 # CLI 실행 도중 세션이 삭제됐을 수 있으므로 run 존재 여부 재확인
                 if await self.db.get(models.Run, run_id) is None:
                     logger.info("solo 완료 후 run이 삭제됨, DB 쓰기 건너뜀: run_id=%s", run_id)
                     return
                 await create_user_message(self.db, session_id, "reader", text, mode="solo")
-                await update_run_status(self.db, run_id, "done", response=text, mode="solo")
+                await update_run_status(
+                    self.db, run_id, "done",
+                    response=text, mode="solo", finished_at=datetime.now(UTC),
+                )
             else:
                 await self._team_execute(result, user_message, session_id, run_id)
         except Exception as e:
@@ -125,7 +162,9 @@ class ReaderAgent:
             await create_user_message(
                 self.db, session_id, "reader", f"⚠️ 오류 발생: {error_msg}", mode="solo"
             )
-            await update_run_status(self.db, run_id, "error", response=error_msg)
+            await update_run_status(
+                self.db, run_id, "error", response=error_msg, finished_at=datetime.now(UTC)
+            )
 
     async def _classify(self, user_message: str) -> ClassificationResult:
         """Solo/Team 분류: 규칙 기반 판정만 사용 (CLI 호출 없음).
@@ -137,12 +176,15 @@ class ReaderAgent:
         logger.info("_classify (rule-based): mode=%s agents=%s", result.mode, result.agents)
         return result
 
-    async def _solo_respond(self, user_message: str) -> str:
-        """Solo 모드 응답 생성."""
+    async def _solo_respond(
+        self, user_message: str, history: list | None = None
+    ) -> str:
+        """Solo 모드 응답 생성. history가 있으면 대화 이력을 프롬프트에 포함."""
+        prompt = _build_conversation_prompt(user_message, history or [])
         return await execute_with_lock(
             call_claude_streaming(
                 self.SOLO_SYSTEM_PROMPT,
-                user_message,
+                prompt,
                 model=settings.solo_model,
             )
         )
@@ -229,7 +271,9 @@ class ReaderAgent:
             logger.info("team 통합 완료 후 run이 삭제됨, DB 쓰기 건너뜀: run_id=%s", run_id)
             return
         await create_user_message(self.db, session_id, "reader", final, mode="team")
-        await update_run_status(self.db, run_id, "done", response=final, mode="team")
+        await update_run_status(
+            self.db, run_id, "done", response=final, mode="team", finished_at=datetime.now(UTC)
+        )
 
     def _create_agent(self, agent_plan: AgentPlan, index: int) -> SubAgent:
         """AgentPlan → SubAgent 생성."""

@@ -43,13 +43,14 @@ export default function UserChannel({
   })
 
   const runStatus = useRunPolling(runId, {
-    onDone: (response, mode, model) => {
+    onDone: (response, mode, model, timing) => {
       onMessageAddedRef.current({
         id: crypto.randomUUID(),
         role: 'reader',
         content: response,
         mode,
         model,
+        timing,
         created_at: new Date().toISOString(),
       })
       onModeChangeRef.current(mode)
@@ -154,7 +155,7 @@ export default function UserChannel({
 
         {runId && (
           <div className="flex justify-start mb-4">
-            <StatusBadge status={runStatus.status} progress={runStatus.progress} model={runStatus.model} />
+            <StatusBadge status={runStatus.status} progress={runStatus.progress} model={runStatus.model} timing={runStatus.timing} />
           </div>
         )}
 

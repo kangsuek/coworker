@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 
 import { api } from '../lib/api'
-import type { RunStatus, RunStatusType } from '../types/api'
+import type { RunStatus, RunStatusType, TimingInfo } from '../types/api'
 
 const TERMINAL_STATES: RunStatusType[] = ['done', 'error', 'cancelled']
 
@@ -12,10 +12,16 @@ const DEFAULT_STATE: RunStatus = {
   mode: null,
   model: null,
   agents: null,
+  timing: null,
 }
 
 export interface RunPollingCallbacks {
-  onDone?: (response: string, mode: 'solo' | 'team' | null, model: string | null) => void
+  onDone?: (
+    response: string,
+    mode: 'solo' | 'team' | null,
+    model: string | null,
+    timing: TimingInfo | null,
+  ) => void
   onError?: (errorResponse: string | null) => void
   onCancelled?: () => void
 }
@@ -45,7 +51,7 @@ export function useRunPolling(
         if (TERMINAL_STATES.includes(data.status)) {
           stoppedRef.current = true
           if (data.status === 'done' && data.response != null) {
-            callbacksRef.current?.onDone?.(data.response, data.mode, data.model)
+            callbacksRef.current?.onDone?.(data.response, data.mode, data.model, data.timing ?? null)
           } else if (data.status === 'error') {
             callbacksRef.current?.onError?.(data.response)
           } else if (data.status === 'cancelled') {

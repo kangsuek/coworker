@@ -84,8 +84,12 @@ async def test_delete_session_cascades_children(client, db):
     assert resp.status_code == 204
 
     # 자식 레코드가 모두 삭제됐는지 확인
-    remaining_runs = (await db.execute(select(Run).where(Run.session_id == sess.id))).scalars().all()
-    remaining_msgs = (await db.execute(select(UserMessage).where(UserMessage.session_id == sess.id))).scalars().all()
+    remaining_runs = (
+        await db.execute(select(Run).where(Run.session_id == sess.id))
+    ).scalars().all()
+    remaining_msgs = (
+        await db.execute(select(UserMessage).where(UserMessage.session_id == sess.id))
+    ).scalars().all()
     assert remaining_runs == []
     assert remaining_msgs == []
 

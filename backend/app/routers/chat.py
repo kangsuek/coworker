@@ -10,6 +10,7 @@ from app.models.schemas import (
     ChatRequest,
     ChatResponse,
     RunStatus,
+    TimingInfo,
 )
 from app.services.cli_service import cancel_current
 from app.services.session_service import (
@@ -62,7 +63,17 @@ async def get_run_status(run_id: str, db: AsyncSession = Depends(get_db)):
         else settings.team_model or None if run.mode == "team"
         else None
     )
-    return RunStatus(status=run.status, response=run.response, mode=run.mode, model=model)
+    timing = None
+    if any([run.started_at, run.thinking_started_at, run.cli_started_at]):
+        timing = TimingInfo(
+            queued_at=run.started_at,
+            thinking_started_at=run.thinking_started_at,
+            cli_started_at=run.cli_started_at,
+            finished_at=run.finished_at,
+        )
+    return RunStatus(
+        status=run.status, response=run.response, mode=run.mode, model=model, timing=timing
+    )
 
 
 @router.get("/runs/{run_id}/agent-messages", response_model=AgentMessagesResponse)

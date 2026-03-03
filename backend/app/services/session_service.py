@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -28,8 +30,10 @@ async def delete_session(db: AsyncSession, session_id: str) -> bool:
     session = await db.get(models.Session, session_id)
     if session is None:
         return False
-    # FK 제약 순서: AgentMessage(run_id→runs) → Run(user_message_id→user_messages) → UserMessage → Session
-    await db.execute(delete(models.AgentMessage).where(models.AgentMessage.session_id == session_id))
+    # FK 제약 순서: AgentMessage → Run → UserMessage → Session
+    await db.execute(
+        delete(models.AgentMessage).where(models.AgentMessage.session_id == session_id)
+    )
     await db.execute(delete(models.Run).where(models.Run.session_id == session_id))
     await db.execute(delete(models.UserMessage).where(models.UserMessage.session_id == session_id))
     await db.delete(session)
@@ -90,6 +94,7 @@ async def create_run(db: AsyncSession, session_id: str, user_message_id: str) ->
     run = models.Run(
         session_id=session_id,
         user_message_id=user_message_id,
+        started_at=datetime.now(UTC),
     )
     db.add(run)
     await db.commit()
@@ -111,6 +116,22 @@ async def update_run_status(
     await db.commit()
     await db.refresh(run)
     return run
+
+
+async def get_recent_messages(
+    db: AsyncSession,
+    session_id: str,
+    limit: int = 20,
+    exclude_id: str | None = None,
+) -> list[models.UserMessage]:
+    """세션의 최근 메시지 목록 (시간순). 현재 메시지(exclude_id)는 제외."""
+    stmt = select(models.UserMessage).where(models.UserMessage.session_id == session_id)
+    if exclude_id:
+        stmt = stmt.where(models.UserMessage.id != exclude_id)
+    stmt = stmt.order_by(models.UserMessage.created_at.desc()).limit(limit)
+    result = await db.execute(stmt)
+    msgs = list(result.scalars().all())
+    return list(reversed(msgs))  # 오래된 것이 앞으로
 
 
 async def create_agent_message(

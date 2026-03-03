@@ -1,11 +1,14 @@
 from datetime import UTC, datetime
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, BeforeValidator
+from pydantic import BaseModel, BeforeValidator, ConfigDict
 
 
 def _ensure_utc(dt: datetime) -> datetime:
-    """SQLite에서 읽은 naive datetime을 UTC로 간주해 타임존을 붙인다. JSON 직렬화 시 Z 포함 → 프론트에서 로컬 시각으로 정확히 변환."""
+    """SQLite에서 읽은 naive datetime을 UTC로 간주해 타임존을 붙인다.
+
+    JSON 직렬화 시 Z 포함 → 프론트에서 로컬 시각으로 정확히 변환.
+    """
     if dt.tzinfo is None:
         return dt.replace(tzinfo=UTC)
     return dt
@@ -36,6 +39,13 @@ class AgentInfo(BaseModel):
     status: str
 
 
+class TimingInfo(BaseModel):
+    queued_at: UTCDatetime | None = None
+    thinking_started_at: UTCDatetime | None = None
+    cli_started_at: UTCDatetime | None = None
+    finished_at: UTCDatetime | None = None
+
+
 class RunStatus(BaseModel):
     status: Literal[
         "queued",
@@ -53,6 +63,7 @@ class RunStatus(BaseModel):
     mode: Literal["solo", "team"] | None = None
     model: str | None = None
     agents: list[AgentInfo] | None = None
+    timing: TimingInfo | None = None
 
 
 class AgentMessageOut(BaseModel):

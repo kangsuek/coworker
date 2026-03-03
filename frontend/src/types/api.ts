@@ -25,6 +25,13 @@ export type RunStatusType =
   | 'error'
   | 'cancelled'
 
+export interface TimingInfo {
+  queued_at: string | null
+  thinking_started_at: string | null
+  cli_started_at: string | null
+  finished_at: string | null
+}
+
 export interface RunStatus {
   status: RunStatusType
   progress: string | null
@@ -32,6 +39,7 @@ export interface RunStatus {
   mode: 'solo' | 'team' | null
   model: string | null
   agents: AgentInfo[] | null
+  timing: TimingInfo | null
 }
 
 export interface AgentMessage {
@@ -61,6 +69,7 @@ export interface UserMessage {
   content: string
   mode: string | null
   model?: string | null
+  timing?: TimingInfo | null
   created_at: string
 }
 
