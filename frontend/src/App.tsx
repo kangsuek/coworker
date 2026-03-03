@@ -11,20 +11,29 @@ import { useSession } from './hooks/useSession'
 const LAYOUT_KEY = 'coworker_layout'
 const THEME_KEY = 'coworker_theme'
 
-/** Claude CLI 등 선택 가능한 모델 목록 (value: API 전달값, label: 표시명) */
-const DEFAULT_MODEL_OPTIONS: { value: string; label: string }[] = [
+const CLAUDE_MODELS = [
   { value: '', label: '기본값' },
   { value: 'sonnet', label: 'Sonnet' },
   { value: 'haiku', label: 'Haiku' },
   { value: 'opus', label: 'Opus' },
 ]
 
-function getModelOptions(currentValue: string): { value: string; label: string }[] {
-  if (!currentValue) return DEFAULT_MODEL_OPTIONS
-  const exists = DEFAULT_MODEL_OPTIONS.some((o) => o.value === currentValue)
-  if (exists) return DEFAULT_MODEL_OPTIONS
-  return [{ value: currentValue, label: currentValue }, ...DEFAULT_MODEL_OPTIONS]
+const GEMINI_MODELS = [
+  { value: '', label: '기본값' },
+  { value: 'gemini‑3‑pro‑preview', label: 'Gemini3 pro' },
+  { value: 'gemini‑3‑flash‑preview', label: 'Gemini3 flash' },
+  { value: 'gemini‑2.5‑pro', label: 'Gemini 2.5 Pro' },
+  { value: 'gemini‑2.5‑flash', label: 'Gemini 2.5 Flash' },
+]
+
+function getModelOptions(provider: string, currentValue: string): { value: string; label: string }[] {
+  const options = provider === 'gemini-cli' ? GEMINI_MODELS : CLAUDE_MODELS
+  if (!currentValue) return options
+  const exists = options.some((o) => o.value === currentValue)
+  if (exists) return options
+  return [{ value: currentValue, label: currentValue }, ...options]
 }
+
 const MIN_SIDEBAR = 180
 const MAX_SIDEBAR = 480
 const DEFAULT_SIDEBAR = 256
@@ -195,10 +204,14 @@ function App() {
             <div className="flex items-center gap-2 text-xs">
               <select 
                 value={llmProvider} 
-                onChange={(e) => setLlmProvider(e.target.value)}
+                onChange={(e) => {
+                  setLlmProvider(e.target.value)
+                  setLlmModel('') // Provide 변경 시 모델 초기화
+                }}
                 className="bg-[#242424] border border-white/10 text-gray-200 rounded px-2 py-0.5 focus:outline-none"
               >
                 <option value="claude-cli">Claude CLI</option>
+                <option value="gemini-cli">Gemini CLI</option>
                 {/* 추후 다른 모델 지원 시 옵션 추가 가능 */}
               </select>
               <select
@@ -207,7 +220,7 @@ function App() {
                 title="모델 선택"
                 className="bg-[#242424] border border-white/10 text-gray-200 rounded px-2 py-0.5 min-w-[140px] focus:outline-none"
               >
-                {getModelOptions(llmModel).map((opt) => (
+                {getModelOptions(llmProvider, llmModel).map((opt) => (
                   <option key={opt.value || '__default__'} value={opt.value}>
                     {opt.label}
                   </option>

@@ -2,9 +2,11 @@
 
 from .base import LLMProvider
 from .claude_cli import ClaudeCliProvider
+from .gemini_cli import GeminiCliProvider
 
 _providers: dict[str, LLMProvider] = {
     "claude-cli": ClaudeCliProvider(),
+    "gemini-cli": GeminiCliProvider(),
     # 새로운 모델 연동 시 여기에 추가 (예: "openai": OpenAIProvider())
 }
 
