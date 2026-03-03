@@ -13,6 +13,7 @@ from app.models.schemas import (
     TimingInfo,
 )
 from app.services.cli_service import cancel_current
+from app.services.llm import get_allowed_provider_names
 from app.services.session_service import (
     create_run,
     create_session,
@@ -40,11 +41,34 @@ async def create_chat(
     db: AsyncSession = Depends(get_db),
 ):
     """사용자 메시지 수신 → run 생성 → 백그라운드 처리 시작."""
+    allowed = get_allowed_provider_names()
+    if req.llm_provider is not None and req.llm_provider not in allowed:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid llm_provider. Allowed: {allowed}",
+        )
     session = None
     if req.session_id:
         session = await get_session(db, req.session_id)
+        if session:
+            # 세션 설정 업데이트 (UI에서 모델 변경 시)
+            updated = False
+            if req.llm_provider and session.llm_provider != req.llm_provider:
+                session.llm_provider = req.llm_provider
+                updated = True
+            if req.llm_model is not None and session.llm_model != req.llm_model:
+                session.llm_model = req.llm_model
+                updated = True
+            if updated:
+                db.add(session)
+                await db.commit()
+
     if session is None:
-        session = await create_session(db)
+        session = await create_session(
+            db,
+            llm_provider=req.llm_provider or "claude-cli",
+            llm_model=req.llm_model
+        )
 
     user_msg = await create_user_message(db, session.id, "user", req.message)
     run = await create_run(db, session.id, user_msg.id)
@@ -58,11 +82,15 @@ async def get_run_status(run_id: str, db: AsyncSession = Depends(get_db)):
     run = await db.get(Run, run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found")
-    model = (
-        settings.solo_model or None if run.mode == "solo"
-        else settings.team_model or None if run.mode == "team"
-        else None
-    )
+    session = await get_session(db, run.session_id)
+    if session and session.llm_model:
+        model = session.llm_model
+    else:
+        model = (
+            settings.solo_model or None if run.mode == "solo"
+            else settings.team_model or None if run.mode == "team"
+            else None
+        )
     timing = None
     if any([run.started_at, run.thinking_started_at, run.cli_started_at]):
         timing = TimingInfo(

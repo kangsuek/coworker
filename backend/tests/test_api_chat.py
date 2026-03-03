@@ -31,6 +31,39 @@ async def test_post_chat_creates_session_if_missing(client):
 
 
 @pytest.mark.asyncio
+async def test_post_chat_invalid_llm_provider_returns_422(client):
+    """지원하지 않는 llm_provider로 POST /api/chat → 422."""
+    with patch("app.routers.chat._run_reader_agent", new_callable=AsyncMock):
+        response = await client.post(
+            "/api/chat",
+            json={"message": "테스트", "llm_provider": "unknown-provider"},
+        )
+    assert response.status_code == 422
+    assert "Invalid llm_provider" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_post_chat_persists_llm_settings(client):
+    """POST /api/chat 시 llm_provider, llm_model 전달 → 세션 조회 시 해당 값 반영."""
+    with patch("app.routers.chat._run_reader_agent", new_callable=AsyncMock):
+        response = await client.post(
+            "/api/chat",
+            json={
+                "message": "모델 설정 테스트",
+                "llm_provider": "claude-cli",
+                "llm_model": "claude-3-5-sonnet",
+            },
+        )
+    assert response.status_code == 200
+    session_id = response.json()["session_id"]
+    get_resp = await client.get(f"/api/sessions/{session_id}")
+    assert get_resp.status_code == 200
+    data = get_resp.json()
+    assert data["llm_provider"] == "claude-cli"
+    assert data["llm_model"] == "claude-3-5-sonnet"
+
+
+@pytest.mark.asyncio
 async def test_post_chat_returns_fast(client):
     """POST → 응답 시간 < 1.0초 (백그라운드 처리 확인)."""
     with patch("app.routers.chat._run_reader_agent", new_callable=AsyncMock):

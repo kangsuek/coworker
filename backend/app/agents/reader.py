@@ -20,7 +20,8 @@ from app.config import settings
 from app.models import db as models
 from app.models.schemas import AgentPlan, ClassificationResult
 from app.services.classification import classify_message
-from app.services.cli_service import LineBufferFlusher, call_claude_streaming, execute_with_lock
+from app.services.cli_service import LineBufferFlusher
+from app.services.llm import get_provider
 from app.services.session_service import (
     create_agent_message,
     create_user_message,
@@ -96,6 +97,11 @@ class ReaderAgent:
             # 현재 run의 user_message_id를 찾아 대화 이력에서 제외
             run = await self.db.get(models.Run, run_id)
             current_msg_id = run.user_message_id if run else None
+
+            session = await self.db.get(models.Session, session_id)
+            provider_name = session.llm_provider if session and session.llm_provider else "claude-cli"
+            self.llm_provider = get_provider(provider_name)
+            self.session_model = session.llm_model if session else None
 
             await update_run_status(
                 self.db, run_id, "thinking", thinking_started_at=datetime.now(UTC)
@@ -181,12 +187,11 @@ class ReaderAgent:
     ) -> str:
         """Solo 모드 응답 생성. history가 있으면 대화 이력을 프롬프트에 포함."""
         prompt = _build_conversation_prompt(user_message, history or [])
-        return await execute_with_lock(
-            call_claude_streaming(
-                self.SOLO_SYSTEM_PROMPT,
-                prompt,
-                model=settings.solo_model,
-            )
+        model_to_use = self.session_model or settings.solo_model
+        return await self.llm_provider.stream_generate(
+            self.SOLO_SYSTEM_PROMPT,
+            prompt,
+            model=model_to_use,
         )
 
     async def _team_execute(
@@ -250,9 +255,8 @@ class ReaderAgent:
             )
 
             try:
-                result = await execute_with_lock(
-                    agent.execute(full_task, context, on_line, model=settings.team_model)
-                )
+                model_to_use = self.session_model or settings.team_model
+                result = await agent.execute(full_task, context, on_line, model=model_to_use)
             except Exception:
                 flusher.stop()
                 await update_agent_message_status(self.db, agent_msg.id, "error")
@@ -282,6 +286,7 @@ class ReaderAgent:
             name=f"{agent_plan.role}-{index + 1}",
             role_preset=agent_plan.role,
             system_prompt=system_prompt,
+            llm_provider=self.llm_provider,
         )
 
     async def _integrate_results(self, user_message: str, results: dict[str, str]) -> str:
@@ -289,12 +294,11 @@ class ReaderAgent:
         parts = [f"[{name} 결과]:\n{result}" for name, result in results.items()]
         combined = "\n\n".join(parts)
         prompt = f"사용자 요청: {user_message}\n\n{combined}"
-        return await execute_with_lock(
-            call_claude_streaming(
-                _INTEGRATE_SYSTEM_PROMPT,
-                prompt,
-                model=settings.team_model,
-            )
+        model_to_use = self.session_model or settings.team_model
+        return await self.llm_provider.stream_generate(
+            _INTEGRATE_SYSTEM_PROMPT,
+            prompt,
+            model=model_to_use,
         )
 
     async def _assemble_context(self, results: dict[str, str]) -> str | None:
@@ -312,11 +316,10 @@ class ReaderAgent:
 
     async def _summarize_for_context(self, agent_name: str, content: str) -> str:
         """긴 결과물을 다음 Agent에 전달할 수 있도록 CLI 호출로 요약."""
-        return await execute_with_lock(
-            call_claude_streaming(
-                _SUMMARIZE_SYSTEM_PROMPT,
-                f"다음은 {agent_name}의 작업 결과입니다. 요약해주세요:\n\n{content}",
-                on_line=None,
-                model=settings.team_model,
-            )
+        model_to_use = self.session_model or settings.team_model
+        return await self.llm_provider.stream_generate(
+            _SUMMARIZE_SYSTEM_PROMPT,
+            f"다음은 {agent_name}의 작업 결과입니다. 요약해주세요:\n\n{content}",
+            on_line=None,
+            model=model_to_use,
         )

@@ -24,7 +24,7 @@ async def test_team_e2e_full_flow(client):
     )
 
     with (
-        patch("app.agents.reader.execute_with_lock") as mock_lock,
+        patch("app.services.llm.claude_cli.execute_with_lock") as mock_lock,
         patch.object(
             ReaderAgent, "_classify", new_callable=AsyncMock, return_value=team_classification
         ),
@@ -47,14 +47,10 @@ async def test_team_e2e_full_flow(client):
         mock_lock.side_effect = fake_lock
 
         sub_patch = patch(
-            "app.agents.sub_agent.call_claude_streaming", new_callable=AsyncMock
+            "app.services.llm.claude_cli.ClaudeCliProvider.stream_generate", new_callable=AsyncMock
         )
-        int_patch = patch(
-            "app.agents.reader.call_claude_streaming", new_callable=AsyncMock
-        )
-        with sub_patch as mock_sub, int_patch as mock_integrate:
+        with sub_patch as mock_sub:
             mock_sub.return_value = "agent 결과"
-            mock_integrate.return_value = "최종 통합 응답"
             post_resp = await client.post(
                 "/api/chat", json={"message": "복잡한 팀 작업 요청"}
             )

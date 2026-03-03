@@ -1,6 +1,8 @@
 export interface ChatRequest {
   session_id?: string
   message: string
+  llm_provider?: string | null
+  llm_model?: string | null
 }
 
 export interface ChatResponse {
@@ -59,6 +61,8 @@ export interface AgentMessagesResponse {
 export interface Session {
   id: string
   title: string | null
+  llm_provider: string
+  llm_model: string | null
   created_at: string
   updated_at: string
 }

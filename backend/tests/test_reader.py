@@ -20,7 +20,7 @@ async def test_process_message_logs_error_on_exception(db):
     run = await create_run(db, sess.id, msg.id)
 
     with (
-        patch("app.agents.reader.call_claude_streaming", new_callable=AsyncMock) as mock_cli,
+        patch("app.services.llm.claude_cli.ClaudeCliProvider.stream_generate", new_callable=AsyncMock) as mock_cli,
         patch("app.agents.reader.logger") as mock_logger,
     ):
         mock_cli.side_effect = RuntimeError("CLI 오류")
@@ -32,7 +32,7 @@ async def test_process_message_logs_error_on_exception(db):
 @pytest.mark.asyncio
 async def test_classify_returns_solo(db):
     """단순 메시지 → solo 분류 (haiku CLI mock)."""
-    with patch("app.agents.reader.call_claude_streaming", new_callable=AsyncMock) as mock_cli:
+    with patch("app.services.llm.claude_cli.ClaudeCliProvider.stream_generate", new_callable=AsyncMock) as mock_cli:
         mock_cli.return_value = '{"mode":"solo","reason":"간단한 질문","agents":[]}'
         result = await ReaderAgent(db)._classify("안녕하세요")
     assert result.mode == "solo"
@@ -51,9 +51,12 @@ async def test_classify_returns_team(db):
 @pytest.mark.asyncio
 async def test_solo_respond_returns_text(db):
     """call_claude_streaming mock → 응답 텍스트 반환."""
-    with patch("app.agents.reader.call_claude_streaming", new_callable=AsyncMock) as mock_cli:
+    with patch("app.services.llm.claude_cli.ClaudeCliProvider.stream_generate", new_callable=AsyncMock) as mock_cli:
         mock_cli.return_value = "응답 텍스트"
+        from app.services.llm import get_provider
         agent = ReaderAgent(db)
+        agent.llm_provider = get_provider("claude-cli")
+        agent.session_model = None
         result = await agent._solo_respond("질문입니다")
     assert result == "응답 텍스트"
 
@@ -65,7 +68,7 @@ async def test_process_message_solo_flow(db):
     msg = await create_user_message(db, sess.id, "user", "안녕")
     run = await create_run(db, sess.id, msg.id)
 
-    with patch("app.agents.reader.call_claude_streaming", new_callable=AsyncMock) as mock_cli:
+    with patch("app.services.llm.claude_cli.ClaudeCliProvider.stream_generate", new_callable=AsyncMock) as mock_cli:
         # solo 응답 1회 (분류는 규칙 기반이므로 CLI 호출 없음)
         mock_cli.return_value = "안녕하세요!"
         agent = ReaderAgent(db)
@@ -84,7 +87,7 @@ async def test_process_message_error_handling(db):
     msg = await create_user_message(db, sess.id, "user", "오류 테스트")
     run = await create_run(db, sess.id, msg.id)
 
-    with patch("app.agents.reader.call_claude_streaming", new_callable=AsyncMock) as mock_cli:
+    with patch("app.services.llm.claude_cli.ClaudeCliProvider.stream_generate", new_callable=AsyncMock) as mock_cli:
         mock_cli.side_effect = RuntimeError("CLI 오류")
         agent = ReaderAgent(db)
         await agent.process_message(sess.id, "오류 테스트", run.id)
@@ -142,7 +145,7 @@ async def test_conversation_history_passed_to_cli(db):
         captured_prompt.append(prompt)
         return "자세한 설명입니다."
 
-    with patch("app.agents.reader.call_claude_streaming", side_effect=fake_streaming):
+    with patch("app.services.llm.claude_cli.ClaudeCliProvider.stream_generate", side_effect=fake_streaming):
         await ReaderAgent(db).process_message(sess.id, "더 자세히 설명해줘", run.id)
 
     assert len(captured_prompt) == 1

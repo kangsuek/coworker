@@ -10,6 +10,8 @@ interface Props {
   currentSession: Session | null
   messages: UserMessage[]
   runId: string | null
+  llmProvider?: string
+  llmModel?: string
   onMessageAdded: (msg: UserMessage) => void
   onSessionCreated: (sessionId: string) => void
   onModeChange: (mode: 'solo' | 'team' | null) => void
@@ -21,6 +23,8 @@ export default function UserChannel({
   currentSession,
   messages,
   runId,
+  llmProvider = 'claude-cli',
+  llmModel = '',
   onMessageAdded,
   onSessionCreated,
   onModeChange,
@@ -112,7 +116,12 @@ export default function UserChannel({
     })
 
     try {
-      const resp = await api.chat({ session_id: currentSession?.id, message: text })
+      const resp = await api.chat({ 
+        session_id: currentSession?.id, 
+        message: text,
+        llm_provider: llmProvider,
+        llm_model: llmModel || null,
+      })
       if (!currentSession) {
         onSessionCreated(resp.session_id)
       }

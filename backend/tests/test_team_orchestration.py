@@ -36,16 +36,17 @@ async def test_team_execute_status_flow(db):
         return await real_update(db, run_id, status, **fields)
 
     agent = ReaderAgent(db)
-
+    from app.services.llm import get_provider
+    agent.llm_provider = get_provider("claude-cli")
+    agent.session_model = None
     with (
         patch("app.agents.reader.update_run_status", side_effect=fake_update_run),
         patch.object(agent, "_assemble_context", new_callable=AsyncMock, return_value=None),
         patch.object(agent, "_integrate_results", new_callable=AsyncMock, return_value="통합 결과"),
         patch("app.agents.reader.create_user_message", new_callable=AsyncMock),
         patch(
-            "app.agents.sub_agent.call_claude_streaming",
-            new_callable=AsyncMock,
-            return_value="결과",
+            "app.services.llm.claude_cli.ClaudeCliProvider.stream_generate",
+            new_callable=AsyncMock,            return_value="결과",
         ),
         patch("app.agents.reader.create_agent_message", new_callable=AsyncMock) as mock_create_am,
         patch("app.agents.reader.update_agent_message_content", new_callable=AsyncMock),
@@ -85,16 +86,17 @@ async def test_team_execute_runs_agents_sequentially(db):
         return f"{task} 결과"
 
     agent = ReaderAgent(db)
-
+    from app.services.llm import get_provider
+    agent.llm_provider = get_provider("claude-cli")
+    agent.session_model = None
     with (
         patch("app.agents.reader.update_run_status", new_callable=AsyncMock),
         patch("app.agents.reader.create_user_message", new_callable=AsyncMock),
         patch.object(agent, "_assemble_context", new_callable=AsyncMock, return_value=None),
         patch.object(agent, "_integrate_results", new_callable=AsyncMock, return_value="통합"),
         patch(
-            "app.agents.sub_agent.call_claude_streaming",
-            new_callable=AsyncMock,
-            return_value="",
+            "app.services.llm.claude_cli.ClaudeCliProvider.stream_generate",
+            new_callable=AsyncMock,            return_value="",
         ),
         patch("app.agents.reader.create_agent_message", new_callable=AsyncMock) as mock_create_am,
         patch("app.agents.reader.update_agent_message_content", new_callable=AsyncMock),
@@ -128,6 +130,9 @@ async def test_team_execute_integrates_results(db):
     )
 
     agent = ReaderAgent(db)
+    from app.services.llm import get_provider
+    agent.llm_provider = get_provider("claude-cli")
+    agent.session_model = None
     saved_messages: list[str] = []
 
     async def fake_create_user_message(db, session_id, role, content, mode=None):
@@ -141,9 +146,8 @@ async def test_team_execute_integrates_results(db):
             agent, "_integrate_results", new_callable=AsyncMock, return_value="최종 통합 응답"
         ),
         patch(
-            "app.agents.sub_agent.call_claude_streaming",
-            new_callable=AsyncMock,
-            return_value="결과",
+            "app.services.llm.claude_cli.ClaudeCliProvider.stream_generate",
+            new_callable=AsyncMock,            return_value="결과",
         ),
         patch("app.agents.reader.create_agent_message", new_callable=AsyncMock) as mock_create_am,
         patch("app.agents.reader.update_agent_message_content", new_callable=AsyncMock),
@@ -175,16 +179,17 @@ async def test_team_execute_records_agent_messages(db):
     )
 
     agent = ReaderAgent(db)
-
+    from app.services.llm import get_provider
+    agent.llm_provider = get_provider("claude-cli")
+    agent.session_model = None
     with (
         patch("app.agents.reader.update_run_status", new_callable=AsyncMock),
         patch("app.agents.reader.create_user_message", new_callable=AsyncMock),
         patch.object(agent, "_assemble_context", new_callable=AsyncMock, return_value=None),
         patch.object(agent, "_integrate_results", new_callable=AsyncMock, return_value="통합"),
         patch(
-            "app.agents.sub_agent.call_claude_streaming",
-            new_callable=AsyncMock,
-            return_value="",
+            "app.services.llm.claude_cli.ClaudeCliProvider.stream_generate",
+            new_callable=AsyncMock,            return_value="",
         ),
         patch("app.agents.reader.create_agent_message", new_callable=AsyncMock) as mock_create_am,
         patch("app.agents.reader.update_agent_message_content", new_callable=AsyncMock),
@@ -219,7 +224,9 @@ async def test_team_execute_sub_agent_exception_sets_error_status(db):
     )
 
     agent = ReaderAgent(db)
-
+    from app.services.llm import get_provider
+    agent.llm_provider = get_provider("claude-cli")
+    agent.session_model = None
     with (
         patch("app.agents.reader.update_run_status", new_callable=AsyncMock),
         patch("app.agents.reader.create_user_message", new_callable=AsyncMock),
@@ -229,9 +236,8 @@ async def test_team_execute_sub_agent_exception_sets_error_status(db):
             "app.agents.reader.update_agent_message_status", new_callable=AsyncMock
         ) as mock_update_status,
         patch(
-            "app.agents.sub_agent.call_claude_streaming",
-            new_callable=AsyncMock,
-            side_effect=RuntimeError("CLI 실패"),
+            "app.services.llm.claude_cli.ClaudeCliProvider.stream_generate",
+            new_callable=AsyncMock,            side_effect=RuntimeError("CLI 실패"),
         ),
         patch("app.agents.reader.update_agent_message_content", new_callable=AsyncMock),
     ):
@@ -269,7 +275,9 @@ async def test_team_execute_integrate_results_failure_propagates(db):
         return await real_update(db, run_id, status, **fields)
 
     agent = ReaderAgent(db)
-
+    from app.services.llm import get_provider
+    agent.llm_provider = get_provider("claude-cli")
+    agent.session_model = None
     with (
         patch("app.agents.reader.update_run_status", side_effect=fake_update_run),
         patch("app.agents.reader.create_user_message", new_callable=AsyncMock),
@@ -281,9 +289,8 @@ async def test_team_execute_integrate_results_failure_propagates(db):
             side_effect=RuntimeError("통합 CLI 실패"),
         ),
         patch(
-            "app.agents.sub_agent.call_claude_streaming",
-            new_callable=AsyncMock,
-            return_value="결과",
+            "app.services.llm.claude_cli.ClaudeCliProvider.stream_generate",
+            new_callable=AsyncMock,            return_value="결과",
         ),
         patch("app.agents.reader.create_agent_message", new_callable=AsyncMock) as mock_create_am,
         patch("app.agents.reader.update_agent_message_content", new_callable=AsyncMock),

@@ -23,6 +23,8 @@ class ChatRequest(BaseModel):
     model_config = ConfigDict(strict=True)
     session_id: str | None = None
     message: str
+    llm_provider: str | None = None
+    llm_model: str | None = None
 
 
 # --- 응답 모델 ---
@@ -86,6 +88,8 @@ class AgentMessagesResponse(BaseModel):
 class SessionOut(BaseModel):
     id: str
     title: str | None
+    llm_provider: str
+    llm_model: str | None
     created_at: UTCDatetime
     updated_at: UTCDatetime
 
@@ -101,6 +105,8 @@ class UserMessageOut(BaseModel):
 class SessionDetail(BaseModel):
     id: str
     title: str | None
+    llm_provider: str
+    llm_model: str | None
     created_at: UTCDatetime
     updated_at: UTCDatetime
     messages: list[UserMessageOut]

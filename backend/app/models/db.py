@@ -45,6 +45,8 @@ class Session(Base):
 
     id: Mapped[str] = mapped_column(primary_key=True, default=lambda: str(uuid.uuid4()))
     title: Mapped[str | None] = mapped_column(Text, default=None)
+    llm_provider: Mapped[str] = mapped_column(Text, default="claude-cli", server_default="claude-cli")
+    llm_model: Mapped[str | None] = mapped_column(Text, default=None)
     created_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime] = mapped_column(
         default=lambda: datetime.now(UTC),

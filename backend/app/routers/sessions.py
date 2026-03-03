@@ -21,7 +21,14 @@ async def list_sessions(
     """세션 목록 조회 (limit/offset 페이징)."""
     sessions = await session_service.list_sessions(db, limit=limit, offset=offset)
     return [
-        SessionOut(id=s.id, title=s.title, created_at=s.created_at, updated_at=s.updated_at)
+        SessionOut(
+            id=s.id,
+            title=s.title,
+            llm_provider=s.llm_provider,
+            llm_model=s.llm_model,
+            created_at=s.created_at,
+            updated_at=s.updated_at,
+        )
         for s in sessions
     ]
 
@@ -31,7 +38,12 @@ async def create_new_session(db: AsyncSession = Depends(get_db)):
     """새 세션 생성."""
     sess = await session_service.create_session(db)
     return SessionOut(
-        id=sess.id, title=sess.title, created_at=sess.created_at, updated_at=sess.updated_at
+        id=sess.id,
+        title=sess.title,
+        llm_provider=sess.llm_provider,
+        llm_model=sess.llm_model,
+        created_at=sess.created_at,
+        updated_at=sess.updated_at,
     )
 
 
@@ -65,6 +77,8 @@ async def get_session(session_id: str, db: AsyncSession = Depends(get_db)):
     return SessionDetail(
         id=session.id,
         title=session.title,
+        llm_provider=session.llm_provider,
+        llm_model=session.llm_model,
         created_at=session.created_at,
         updated_at=session.updated_at,
         messages=[

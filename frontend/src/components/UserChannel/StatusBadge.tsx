@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 
 import type { RunStatusType, TimingInfo } from '../../types/api'
 
@@ -49,33 +49,25 @@ export default function StatusBadge({ status, progress, model, timing }: Props) 
   const config = STATUS_CONFIG[status]
   const isAnimated = ANIMATED_STATES.includes(status)
   const modelLabel = shortModelName(model)
-  const [elapsedSec, setElapsedSec] = useState<number | null>(null)
-  const startRefTime = useRef<Date | null>(null)
+
+  let startDate: Date | null = null
+  if (status === 'thinking' && timing?.thinking_started_at) {
+    startDate = new Date(timing.thinking_started_at)
+  } else if (status === 'solo' && timing?.cli_started_at) {
+    startDate = new Date(timing.cli_started_at)
+  }
+
+  const [now, setNow] = useState<number | null>(null)
+
+  const startTimeMs = startDate?.getTime()
 
   useEffect(() => {
-    let startDate: Date | null = null
-    if (status === 'thinking' && timing?.thinking_started_at) {
-      startDate = new Date(timing.thinking_started_at)
-    } else if (status === 'solo' && timing?.cli_started_at) {
-      startDate = new Date(timing.cli_started_at)
-    }
-
-    startRefTime.current = startDate
-
-    if (!startDate) {
-      setElapsedSec(null)
-      return
-    }
-
-    const update = () => {
-      if (startRefTime.current) {
-        setElapsedSec((Date.now() - startRefTime.current.getTime()) / 1000)
-      }
-    }
-    update()
-    const id = setInterval(update, 100)
+    if (!startTimeMs) return
+    const id = setInterval(() => setNow(Date.now()), 100)
     return () => clearInterval(id)
-  }, [status, timing?.thinking_started_at, timing?.cli_started_at])
+  }, [startTimeMs])
+
+  const elapsedSec = startDate && now ? (now - startDate.getTime()) / 1000 : null
 
   return (
     <span

@@ -22,8 +22,7 @@ async def test_solo_e2e_full_flow(client, db):
     """POST → BackgroundTask 완료 → GET → done + response 확인."""
     with (
         patch("app.routers.chat.async_session", return_value=_make_session_cm(db)),
-        patch("app.agents.reader.call_claude_streaming", new_callable=AsyncMock) as mock_cli,
-    ):
+        patch("app.services.llm.claude_cli.ClaudeCliProvider.stream_generate", new_callable=AsyncMock) as mock_cli,    ):
         mock_cli.return_value = "Solo 응답 텍스트"
         post_resp = await client.post("/api/chat", json={"message": "안녕하세요"})
 
@@ -43,8 +42,7 @@ async def test_solo_e2e_session_history(client, db):
     """Solo 응답 완료 후 세션 히스토리에 user + reader 메시지 저장 확인."""
     with (
         patch("app.routers.chat.async_session", return_value=_make_session_cm(db)),
-        patch("app.agents.reader.call_claude_streaming", new_callable=AsyncMock) as mock_cli,
-    ):
+        patch("app.services.llm.claude_cli.ClaudeCliProvider.stream_generate", new_callable=AsyncMock) as mock_cli,    ):
         mock_cli.side_effect = [
             '{"mode":"solo","reason":"단순","agents":[]}',
             "히스토리 응답",
@@ -65,8 +63,7 @@ async def test_solo_e2e_rule_based_solo_fallback(client, db):
     """규칙 기반 분류: 팀 키워드 없는 단순 메시지 → solo → 응답 성공."""
     with (
         patch("app.routers.chat.async_session", return_value=_make_session_cm(db)),
-        patch("app.agents.reader.call_claude_streaming", new_callable=AsyncMock) as mock_cli,
-    ):
+        patch("app.services.llm.claude_cli.ClaudeCliProvider.stream_generate", new_callable=AsyncMock) as mock_cli,    ):
         mock_cli.return_value = "Solo 응답"
         post_resp = await client.post("/api/chat", json={"message": "분류 불가 요청"})
 

@@ -11,9 +11,13 @@ from sqlalchemy.orm import selectinload
 from app.models import db as models
 
 
-async def create_session(db: AsyncSession) -> models.Session:
+async def create_session(
+    db: AsyncSession,
+    llm_provider: str = "claude-cli",
+    llm_model: str | None = None
+) -> models.Session:
     """새 세션 생성."""
-    sess = models.Session()
+    sess = models.Session(llm_provider=llm_provider, llm_model=llm_model)
     db.add(sess)
     await db.commit()
     await db.refresh(sess)

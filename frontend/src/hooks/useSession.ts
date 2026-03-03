@@ -89,6 +89,8 @@ export function useSession(): UseSessionResult {
     const pseudo: Session = {
       id: sessionId,
       title: null,
+      llm_provider: 'claude-cli',
+      llm_model: null,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     }

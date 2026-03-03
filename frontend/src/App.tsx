@@ -10,6 +10,21 @@ import { useSession } from './hooks/useSession'
 
 const LAYOUT_KEY = 'coworker_layout'
 const THEME_KEY = 'coworker_theme'
+
+/** Claude CLI 등 선택 가능한 모델 목록 (value: API 전달값, label: 표시명) */
+const DEFAULT_MODEL_OPTIONS: { value: string; label: string }[] = [
+  { value: '', label: '기본값' },
+  { value: 'sonnet', label: 'Sonnet' },
+  { value: 'haiku', label: 'Haiku' },
+  { value: 'opus', label: 'Opus' },
+]
+
+function getModelOptions(currentValue: string): { value: string; label: string }[] {
+  if (!currentValue) return DEFAULT_MODEL_OPTIONS
+  const exists = DEFAULT_MODEL_OPTIONS.some((o) => o.value === currentValue)
+  if (exists) return DEFAULT_MODEL_OPTIONS
+  return [{ value: currentValue, label: currentValue }, ...DEFAULT_MODEL_OPTIONS]
+}
 const MIN_SIDEBAR = 180
 const MAX_SIDEBAR = 480
 const DEFAULT_SIDEBAR = 256
@@ -58,6 +73,16 @@ function App() {
   const [currentMode, setCurrentMode] = useState<'solo' | 'team' | null>(null)
   const [currentRunId, setCurrentRunId] = useState<string | null>(null)
   const session = useSession()
+
+  const [llmProvider, setLlmProvider] = useState('claude-cli')
+  const [llmModel, setLlmModel] = useState('')
+  const [prevSessionId, setPrevSessionId] = useState<string | undefined>(undefined)
+
+  if (session.currentSession?.id !== prevSessionId) {
+    setPrevSessionId(session.currentSession?.id)
+    setLlmProvider(session.currentSession?.llm_provider || 'claude-cli')
+    setLlmModel(session.currentSession?.llm_model || '')
+  }
 
   useEffect(() => {
     localStorage.setItem(LAYOUT_KEY, JSON.stringify({ sidebar: layout.sidebar, agent: layout.agent }))
@@ -153,17 +178,42 @@ function App() {
       <div className="flex-1 flex min-w-0 min-h-0 overflow-hidden">
         {/* User Channel */}
         <div className="flex-1 flex flex-col min-h-0 border-r border-white/10 dark:border-white/10 min-w-[200px] overflow-hidden">
-          <header className="h-8 px-4 border-b border-white/10 dark:border-white/10 bg-[#141414] dark:bg-[#141414] flex items-center gap-2 shrink-0">
-            <button
-              onClick={() => setSidebarOpen(!sidebarOpen)}
-              className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-gray-600 dark:text-gray-300"
-              title={sidebarOpen ? '사이드바 닫기' : '사이드바 열기'}
-            >
-              ☰
-            </button>
-            <span className="font-medium truncate text-gray-200 dark:text-gray-200">
-              {session.currentSession?.title ?? '새 대화'}
-            </span>
+          <header className="h-8 px-4 border-b border-white/10 dark:border-white/10 bg-[#141414] dark:bg-[#141414] flex items-center justify-between shrink-0">
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setSidebarOpen(!sidebarOpen)}
+                className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-gray-600 dark:text-gray-300"
+                title={sidebarOpen ? '사이드바 닫기' : '사이드바 열기'}
+              >
+                ☰
+              </button>
+              <span className="font-medium truncate text-gray-200 dark:text-gray-200">
+                {session.currentSession?.title ?? '새 대화'}
+              </span>
+            </div>
+            
+            <div className="flex items-center gap-2 text-xs">
+              <select 
+                value={llmProvider} 
+                onChange={(e) => setLlmProvider(e.target.value)}
+                className="bg-[#242424] border border-white/10 text-gray-200 rounded px-2 py-0.5 focus:outline-none"
+              >
+                <option value="claude-cli">Claude CLI</option>
+                {/* 추후 다른 모델 지원 시 옵션 추가 가능 */}
+              </select>
+              <select
+                value={llmModel}
+                onChange={(e) => setLlmModel(e.target.value)}
+                title="모델 선택"
+                className="bg-[#242424] border border-white/10 text-gray-200 rounded px-2 py-0.5 min-w-[140px] focus:outline-none"
+              >
+                {getModelOptions(llmModel).map((opt) => (
+                  <option key={opt.value || '__default__'} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </div>
           </header>
 
           <UserChannel
@@ -171,6 +221,8 @@ function App() {
             currentSession={session.currentSession}
             messages={session.messages}
             runId={currentRunId}
+            llmProvider={llmProvider}
+            llmModel={llmModel}
             onMessageAdded={session.addMessage}
             onSessionCreated={handleSessionCreated}
             onModeChange={setCurrentMode}
