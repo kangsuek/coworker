@@ -155,12 +155,17 @@ export default function AgentChannel({
             <div className="w-3 h-4 bg-emerald-500 animate-pulse mb-3" />
             <p className="text-sm font-mono text-emerald-500">&gt; Agent 작업 시작 중...</p>
           </div>
+        ) : mode === 'solo' ? (
+          <div className="flex flex-col items-center justify-center h-full text-gray-400 dark:text-gray-500">
+            <div className="w-3 h-4 bg-emerald-500 mb-3" />
+            <p className="text-sm font-mono text-emerald-500">&gt; Solo 모드</p>
+            <p className="text-xs font-mono text-gray-500 mt-1.5">단독 응답이 처리됩니다.</p>
+          </div>
         ) : (
           <div className="flex flex-col items-center justify-center h-full text-gray-400 dark:text-gray-500">
             <div className="w-3 h-4 bg-emerald-500 animate-pulse mb-3" />
             <p className="text-sm font-mono text-emerald-500">&gt; Team 작업이 시작되면</p>
             <p className="text-xs font-mono text-gray-500 mt-1.5">Agent 간 대화가 시작됩니다.</p>
-            
           </div>
         )}
         <div ref={messagesEndRef} />
