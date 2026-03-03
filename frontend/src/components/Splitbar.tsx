@@ -40,7 +40,7 @@ export default function Splitbar({ onResize, className = '' }: Props) {
     <div
       role="separator"
       aria-orientation="vertical"
-      className={`w-1 shrink-0 bg-white/10 hover:bg-emerald-500 transition-colors cursor-col-resize flex-shrink-0 ${className}`}
+      className={`w-1 shrink-0 bg-gray-200 dark:bg-white/10 hover:bg-emerald-500 transition-colors cursor-col-resize flex-shrink-0 ${className}`}
       onMouseDown={handleMouseDown}
       title="드래그하여 너비 조절"
     />

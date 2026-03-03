@@ -154,9 +154,9 @@ export default function UserChannel({
     <>
       <div className="flex-1 min-h-0 overflow-y-auto p-4">
         {messages.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full text-gray-400 dark:text-gray-500">
-            <p className="text-sm font-mono text-emerald-500 mb-1">&gt; 무엇이든 물어보세요</p>
-            <p className="text-xs font-mono opacity-50">복잡한 작업은 Team 모드로 진행할 수 있습니다.</p>
+          <div className="flex flex-col items-center justify-center h-full text-gray-500 dark:text-gray-500">
+            <p className="text-sm font-mono text-emerald-600 dark:text-emerald-500 mb-1">&gt; 무엇이든 물어보세요</p>
+            <p className="text-xs font-mono text-gray-400">복잡한 작업은 Team 모드로 진행할 수 있습니다.</p>
           </div>
         ) : (
           messages.map((msg) => <MessageBubble key={msg.id} message={msg} />)
@@ -171,7 +171,7 @@ export default function UserChannel({
         <div ref={messagesEndRef} />
       </div>
 
-      <div className="h-10 flex items-center px-3 py-1.5 border-t border-white/10 dark:border-white/10 bg-[#141414] dark:bg-[#141414] shrink-0">
+      <div className="h-10 flex items-center px-3 py-1.5 border-t border-gray-200 dark:border-white/10 bg-white dark:bg-[#141414] shrink-0">
         <div className="flex gap-1.5 w-full items-center">
           <input
             type="text"
@@ -184,7 +184,7 @@ export default function UserChannel({
               }
             }}
             placeholder="메시지를 입력하세요..."
-            className="flex-1 min-h-0 px-3 py-1 border border-white/10 dark:border-white/10 rounded-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent text-sm text-gray-200 dark:text-gray-200 bg-[#0D0D0D] dark:bg-[#0D0D0D] placeholder-gray-500 dark:placeholder-gray-400 disabled:bg-gray-50 dark:disabled:bg-gray-600"
+            className="flex-1 min-h-0 px-3 py-1 border border-gray-300 dark:border-white/10 rounded-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent text-sm text-gray-900 dark:text-gray-200 bg-white dark:bg-[#0D0D0D] placeholder-gray-400 dark:placeholder-gray-400 disabled:bg-gray-100 dark:disabled:bg-gray-600"
             disabled={isRunning}
           />
           {/* 6-5: 실행 중이면 취소 버튼, 아니면 전송 버튼 */}

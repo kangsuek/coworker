@@ -7,6 +7,8 @@ import App from './App.tsx'
 try {
   if (localStorage.getItem('coworker_theme') === 'dark') {
     document.documentElement.classList.add('dark')
+  } else {
+    document.documentElement.classList.remove('dark')
   }
 } catch {
   /* ignore */

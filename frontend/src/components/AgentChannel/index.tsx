@@ -73,8 +73,8 @@ export default function AgentChannel({
 
   if (collapsed) {
     return (
-      <div className="w-full min-w-0 min-h-0 h-full flex flex-col bg-[#0D0D0D] dark:bg-[#0D0D0D] shrink-0 relative overflow-hidden">
-        <div className="h-8 flex items-center justify-center border-b border-white/10 dark:border-white/10 bg-[#141414] dark:bg-[#141414] shrink-0">
+      <div className="w-full min-w-0 min-h-0 h-full flex flex-col bg-gray-50 dark:bg-[#0D0D0D] shrink-0 relative overflow-hidden">
+        <div className="h-8 flex items-center justify-center border-b border-gray-200 dark:border-white/10 bg-white dark:bg-[#141414] shrink-0">
           {onExpand && (
             <button
               type="button"
@@ -106,9 +106,9 @@ export default function AgentChannel({
   }
 
   return (
-    <div className="w-full min-w-0 min-h-0 h-full flex flex-col bg-[#0D0D0D] dark:bg-[#0D0D0D] shrink-0 relative overflow-hidden">
-      <header className="h-8 pl-4 pr-0 border-b border-white/10 dark:border-white/10 bg-[#141414] dark:bg-[#141414] shrink-0 flex items-center justify-between">
-        <span className="font-medium text-gray-200 dark:text-gray-200 truncate min-w-0">Agent Channel</span>
+    <div className="w-full min-w-0 min-h-0 h-full flex flex-col bg-gray-50 dark:bg-[#0D0D0D] shrink-0 relative overflow-hidden">
+      <header className="h-8 pl-4 pr-0 border-b border-gray-200 dark:border-white/10 bg-white dark:bg-[#141414] shrink-0 flex items-center justify-between">
+        <span className="font-medium text-gray-800 dark:text-gray-200 truncate min-w-0">Agent Channel</span>
         <div className="flex items-center gap-1 shrink-0">
           {hasMessages && (
             <>
@@ -151,20 +151,20 @@ export default function AgentChannel({
             ))}
           </>
         ) : isTeamActive && isPolling ? (
-          <div className="flex flex-col items-center justify-center h-full text-gray-400 dark:text-gray-500">
+          <div className="flex flex-col items-center justify-center h-full text-gray-500 dark:text-gray-500">
             <div className="w-3 h-4 bg-emerald-500 animate-pulse mb-3" />
-            <p className="text-sm font-mono text-emerald-500">&gt; Agent 작업 시작 중...</p>
+            <p className="text-sm font-mono text-emerald-600 dark:text-emerald-500">&gt; Agent 작업 시작 중...</p>
           </div>
         ) : mode === 'solo' ? (
-          <div className="flex flex-col items-center justify-center h-full text-gray-400 dark:text-gray-500">
+          <div className="flex flex-col items-center justify-center h-full text-gray-500 dark:text-gray-500">
             <div className="w-3 h-4 bg-emerald-500 mb-3" />
-            <p className="text-sm font-mono text-emerald-500">&gt; Solo 모드</p>
+            <p className="text-sm font-mono text-emerald-600 dark:text-emerald-500">&gt; Solo 모드</p>
             <p className="text-xs font-mono text-gray-500 mt-1.5">단독 응답이 처리됩니다.</p>
           </div>
         ) : (
-          <div className="flex flex-col items-center justify-center h-full text-gray-400 dark:text-gray-500">
+          <div className="flex flex-col items-center justify-center h-full text-gray-500 dark:text-gray-500">
             <div className="w-3 h-4 bg-emerald-500 animate-pulse mb-3" />
-            <p className="text-sm font-mono text-emerald-500">&gt; Team 작업이 시작되면</p>
+            <p className="text-sm font-mono text-emerald-600 dark:text-emerald-500">&gt; Team 작업이 시작되면</p>
             <p className="text-xs font-mono text-gray-500 mt-1.5">Agent 간 대화가 시작됩니다.</p>
           </div>
         )}
@@ -176,7 +176,7 @@ export default function AgentChannel({
 
       {/* 다운로드 완료 토스트 */}
       {toast && (
-        <div className="absolute bottom-16 left-1/2 -translate-x-1/2 px-4 py-2 bg-gray-800 dark:bg-gray-700 text-white text-xs rounded-lg shadow-lg transition-opacity duration-200">
+        <div className="absolute bottom-16 left-1/2 -translate-x-1/2 px-4 py-2 bg-gray-800 text-white dark:bg-gray-700 text-xs rounded-lg shadow-lg transition-opacity duration-200">
           ✓ {toast}
         </div>
       )}
