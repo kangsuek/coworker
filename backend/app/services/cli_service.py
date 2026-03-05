@@ -21,10 +21,10 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-_current_proc: subprocess.Popen | None = None
+_active_procs: set[subprocess.Popen] = set()
 _cli_lock = asyncio.Lock()
-# cancel race condition 방어: Popen 직전에 취소 요청이 들어온 경우를 감지
-_is_cancelled: bool = False
+# 특정 run_id의 취소 상태를 추적 (전역 플래그 대신 집합 사용)
+_cancelled_runs: set[str] = set()
 
 
 def _call_claude_sync(
@@ -39,11 +39,9 @@ def _call_claude_sync(
         system_prompt: 시스템 프롬프트
         user_message: 사용자 메시지
         on_line: 각 stdout 라인마다 호출될 콜백
-        **kwargs: output_json (bool), timeout (int)
+        **kwargs: output_json (bool), timeout (int), run_id (str)
     """
-    global _current_proc, _is_cancelled
-
-    _is_cancelled = False  # 이전 취소 상태 초기화
+    run_id: str | None = kwargs.get("run_id")
     output_json: bool = kwargs.get("output_json", False)
     timeout: int = kwargs.get("timeout", settings.claude_cli_timeout)
 
@@ -54,10 +52,15 @@ def _call_claude_sync(
         cmd.extend(["--model", model])
     if output_json:
         cmd.extend(["--output-format", "json"])
-    logger.debug("Claude CLI 시작: output_json=%s, timeout=%ds", output_json, timeout)
+    logger.debug("Claude CLI 시작: run_id=%s, model=%s", run_id, model)
 
     # CLAUDECODE 환경변수 제거: Claude Code 세션 내에서 중첩 실행 방지
     child_env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
+
+    # Popen 직전 취소 여부 확인
+    if run_id and run_id in _cancelled_runs:
+        logger.info("Claude CLI 실행 전 취소됨: run_id=%s", run_id)
+        raise RuntimeError(f"Run {run_id} cancelled before execution")
 
     proc = subprocess.Popen(
         cmd,
@@ -70,20 +73,29 @@ def _call_claude_sync(
         cwd="/tmp",  # CLAUDE.md 자동 로드 방지 (프로젝트 컨텍스트 오염 차단)
     )
 
-    # Popen과 _current_proc 할당 사이에 cancel 요청이 들어온 경우 즉시 종료
-    if _is_cancelled:
+    # 활성 프로세스 집합에 추가
+    _active_procs.add(proc)
+
+    # Popen 직후 취소 여부 재확인 (Race condition 방어)
+    if run_id and run_id in _cancelled_runs:
         try:
             os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
         except (ProcessLookupError, OSError):
             pass
         proc.wait()
-        raise RuntimeError("Cancelled before execution")
-
-    _current_proc = proc
+        if proc in _active_procs:
+            _active_procs.remove(proc)
+        raise RuntimeError(f"Run {run_id} cancelled during startup")
 
     lines: list[str] = []
     try:
         for line in proc.stdout:
+            # 루프 내에서 취소 여부 수시 확인 (Bug 1.4 방어)
+            if run_id and run_id in _cancelled_runs:
+                logger.info("Claude CLI 실행 중 중단: run_id=%s", run_id)
+                os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+                break
+
             lines.append(line)
             if on_line:
                 on_line(line)
@@ -96,11 +108,23 @@ def _call_claude_sync(
         proc.wait()
         logger.error("Claude CLI 타임아웃: pid=%d, timeout=%ds", proc.pid, timeout)
         raise RuntimeError(f"CLI timeout after {timeout}s")
+    except Exception:
+        # 기타 예외 발생 시 프로세스 정리
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+        except (ProcessLookupError, OSError):
+            pass
+        proc.wait()
+        raise
     finally:
-        _current_proc = None
+        if proc in _active_procs:
+            _active_procs.remove(proc)
+
+    # 취소로 인한 종료인 경우 예외 발생
+    if run_id and run_id in _cancelled_runs:
+        raise RuntimeError(f"Run {run_id} was cancelled")
 
     if proc.returncode != 0:
-        # stderr는 stdout에 합쳐졌으므로 이미 lines에 포함됨
         logger.error("Claude CLI 비정상 종료: rc=%d, output_lines=%d", proc.returncode, len(lines))
         raise RuntimeError(f"Claude CLI error (rc={proc.returncode}): {''.join(lines)}")
 
@@ -120,72 +144,87 @@ async def call_claude_streaming(
     )
 
 
-async def execute_with_lock(coro):
-    """Lock 획득 후 코루틴 실행. 대기 중이면 queued 상태."""
+async def execute_with_lock(coro, run_id: str | None = None):
+    """Lock 획득 후 코루틴 실행. 락 획득 직후 취소 여부 확인."""
     async with _cli_lock:
+        if run_id and run_id in _cancelled_runs:
+            logger.info("Lock 획득했으나 이미 취소된 Run: run_id=%s", run_id)
+            raise RuntimeError(f"Run {run_id} was cancelled while waiting for lock")
         return await coro
 
 
-async def cancel_current():
-    """현재 실행 중인 CLI 프로세스 + 자식 프로세스 전체 종료."""
-    global _is_cancelled
-    _is_cancelled = True  # Popen 직전 취소 요청 대비 플래그 설정
-    if _current_proc and _current_proc.poll() is None:
-        logger.info("Claude CLI 취소 요청: pid=%d", _current_proc.pid)
-        try:
-            os.killpg(os.getpgid(_current_proc.pid), signal.SIGTERM)
-        except (ProcessLookupError, OSError):
-            pass
+async def cancel_current(run_id: str | None = None):
+    """현재 실행 중인 CLI 프로세스 전체 종료 및 취소 목록 등록."""
+    if run_id:
+        _cancelled_runs.add(run_id)
+    
+    if not _active_procs:
+        return
+
+    logger.info("Claude CLI 취소 요청 (일괄 종료): count=%d", len(_active_procs))
+    for proc in list(_active_procs):
+        if proc.poll() is None:
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+            except (ProcessLookupError, OSError):
+                pass
 
 
 class LineBufferFlusher:
-    """0.5초 간격 배치 flush 버퍼.
+    """비동기 배치 flush 버퍼.
 
     Popen stdout 라인을 인메모리 버퍼에 모아두고,
-    단일 데몬 스레드가 주기적으로 flush_callback을 호출한다.
-    threading.Timer 반복 생성 대신 Event.wait()를 사용해 스레드 오버헤드를 최소화한다.
-    버퍼 스왑 패턴으로 Lock 보유 시간을 최소화한다.
+    비동기 태스크가 주기적으로 비동기 flush_callback을 호출한다.
+    모든 DB 쓰기 작업이 동일한 비동기 락(db_lock)을 사용할 수 있게 한다.
     """
 
-    def __init__(self, flush_callback: Callable[[list[str]], None], flush_interval: float = 0.5):
+    def __init__(self, flush_callback: Callable[[list[str]], Coroutine[Any, Any, None]], flush_interval: float = 0.5):
         self._flush_callback = flush_callback
         self._flush_interval = flush_interval
-        self._lock = threading.Lock()
+        self._lock = threading.Lock()  # 버퍼 접근용 동기 락 (append는 stdout 루프에서 호출됨)
         self._buffer: list[str] = []
-        self._stop_event = threading.Event()
-        self._thread: threading.Thread | None = None
+        self._stop_event = asyncio.Event()
+        self._task: asyncio.Task | None = None
 
     def append(self, line: str) -> None:
-        """Lock 획득 → 버퍼에 라인 추가."""
+        """버퍼에 라인 추가 (동기 호출 가능)."""
         with self._lock:
             self._buffer.append(line)
 
-    def flush(self) -> None:
-        """Lock 획득 → 버퍼 스왑(교체+초기화) → Lock 해제 → 스왑된 데이터로 콜백 호출."""
+    async def flush(self) -> None:
+        """버퍼 스왑 후 비동기 콜백 호출."""
         with self._lock:
             if not self._buffer:
                 return
             snapshot = self._buffer
             self._buffer = []
 
-        self._flush_callback(snapshot)
+        await self._flush_callback(snapshot)
 
-    def _run(self) -> None:
-        """데몬 스레드 루프: stop_event가 설정될 때까지 주기적으로 flush."""
-        # wait()가 timeout 안에 이벤트가 설정되면 True, 타임아웃이면 False 반환
-        while not self._stop_event.wait(timeout=self._flush_interval):
-            self.flush()
+    async def _run_loop(self) -> None:
+        """비동기 루프: stop_event가 설정될 때까지 주기적으로 flush."""
+        try:
+            while not self._stop_event.is_set():
+                await asyncio.sleep(self._flush_interval)
+                await self.flush()
+        except asyncio.CancelledError:
+            pass
+        finally:
+            await self.flush()
 
     def start(self) -> None:
-        """단일 데몬 스레드 시작."""
+        """비동기 루프 태스크 시작."""
         self._stop_event.clear()
-        self._thread = threading.Thread(target=self._run, daemon=True)
-        self._thread.start()
+        self._task = asyncio.create_task(self._run_loop())
 
-    def stop(self) -> None:
-        """스레드 종료 신호 + 잔여 버퍼 최종 flush."""
+    async def stop(self) -> None:
+        """비동기 루프 중지 및 최종 flush."""
         self._stop_event.set()
-        if self._thread is not None:
-            self._thread.join()
-            self._thread = None
-        self.flush()
+        if self._task:
+            self._task.cancel()
+            try:
+                await self._task
+            except asyncio.CancelledError:
+                pass
+            self._task = None
+        await self.flush()

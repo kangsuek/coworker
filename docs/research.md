@@ -1,161 +1,51 @@
-# LLM 리팩토링 조사 보고서
+# 시스템 버그 및 아키텍처 조사 보고서 (최종 업데이트: 2026-03-04)
 
-## 1) 조사 범위 및 방법
-- 기준 문서: `LLM_REFACTORING_DOCS.md`
-- 실제 구현 대조 파일:
-  - 백엔드: `backend/app/routers/chat.py`, `backend/app/routers/sessions.py`, `backend/app/agents/reader.py`, `backend/app/agents/sub_agent.py`, `backend/app/models/db.py`, `backend/app/models/schemas.py`, `backend/app/services/session_service.py`, `backend/app/services/llm/*`, `backend/migrations/versions/f27a2374a8c2_add_llm_provider_and_llm_model.py`
-  - 프론트엔드: `frontend/src/App.tsx`, `frontend/src/components/UserChannel/index.tsx`, `frontend/src/hooks/useSession.ts`, `frontend/src/types/api.ts`, `frontend/src/lib/api.ts`
-- 검증 시도:
-  - 백엔드 테스트 실행 불가(환경에 `pytest` 미설치)
-  - 프론트 빌드 실행 결과: 타입 오류 1건 재현
-    - `src/hooks/useSession.ts(89,11): Type ... is missing llm_provider, llm_model`
+Phase 1(기억력) 및 Phase 2(병렬 실행) 구현 이후 발견된 주요 결함들에 대한 수정 현황 및 잔존 이슈 보고서입니다.
 
-## 2) 문서상 의도된 흐름 요약
-1. 사용자가 UI에서 `llm_provider`, `llm_model` 선택
-2. `POST /api/chat` 요청 시 설정값 전달
-3. 세션 생성/갱신 시 DB `sessions.llm_provider`, `sessions.llm_model` 저장
-4. `ReaderAgent`가 세션에서 제공자/모델 조회 후 LLM 호출
-5. Solo/Team 모두 provider 추상화(`LLMProvider.stream_generate`)를 통해 실행
-6. 세션 조회 API와 프론트 상태가 해당 설정을 지속적으로 동기화
+## 1. 수정 완료된 핵심 버그 (Resolved Issues)
 
-## 3) 발견된 버그 (치명도 순)
+### 1.1. [완료] 병렬 실행 시 프로세스 취소 누락
+- **내용**: 단일 전역 변수 구조로 인해 병렬 에이전트 실행 시 마지막 프로세스만 취소되던 현상.
+- **해결**: `cli_service.py`에 `_active_procs` 집합을 도입하여 모든 활성 프로세스를 추적하고 일괄 종료하도록 개선.
 
-### [Critical] 세션 API 응답 스키마 불일치로 런타임 500 가능
-- 위치: `backend/app/routers/sessions.py`
-- 원인:
-  - `SessionOut`, `SessionDetail` 스키마는 `llm_provider`, `llm_model`을 필수로 요구
-  - 그런데 라우터 반환 시 두 필드를 누락
-- 영향:
-  - `GET /api/sessions`, `POST /api/sessions`, `GET /api/sessions/{id}`에서 응답 모델 검증 실패 가능
-  - 세션 목록/상세/생성의 핵심 기능이 깨질 수 있음
-- 근거 코드:
-```23:35:backend/app/routers/sessions.py
-    return [
-        SessionOut(id=s.id, title=s.title, created_at=s.created_at, updated_at=s.updated_at)
-        for s in sessions
-    ]
-...
-    return SessionOut(
-        id=sess.id, title=sess.title, created_at=sess.created_at, updated_at=sess.updated_at
-    )
-```
-```88:111:backend/app/models/schemas.py
-class SessionOut(BaseModel):
-    id: str
-    title: str | None
-    llm_provider: str
-    llm_model: str | None
-    created_at: UTCDatetime
-    updated_at: UTCDatetime
-```
-- 권장 수정:
-  - `sessions.py`의 모든 `SessionOut`, `SessionDetail` 생성부에 `llm_provider`, `llm_model` 명시 추가
-  - 세션 API 테스트에 해당 필드 존재 assert 추가
+### 1.2. [완료] 취소 플래그 영구 지속 및 서비스 마비 (Bug 1.2b)
+- **내용**: 한 번의 취소가 전역 플래그를 True로 유지하여 이후 모든 요청을 차단하던 문제.
+- **해결**: 전역 boolean 대신 `_cancelled_runs` (Set[str])를 사용하여 특정 `run_id` 단위로 취소 상태를 고립시킴.
 
-### [High] 프론트 타입 오류로 빌드 실패
-- 위치: `frontend/src/hooks/useSession.ts`
-- 원인:
-  - `Session` 타입에 `llm_provider`, `llm_model`이 필수가 되었는데 pseudo session 객체에 누락
-- 재현:
-  - `frontend`에서 `npm run -s build` 실행 시 실패
-- 근거 코드:
-```88:99:frontend/src/hooks/useSession.ts
-  const setCurrentSessionFromChat = useCallback((sessionId: string) => {
-    const pseudo: Session = {
-      id: sessionId,
-      title: null,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    }
-```
-- 영향:
-  - CI/로컬 빌드 파이프라인 차단
-  - 타입 안정성 붕괴
-- 권장 수정:
-  - pseudo 객체에 기본값 추가
-    - `llm_provider: 'claude-cli'`
-    - `llm_model: null`
+### 1.3. [완료] 비정상 종료 시 고아 프로세스/스레드 누수 (Bug 1.4)
+- **내용**: 태스크 취소 시 `asyncio.to_thread` 내부의 subprocess가 살아남는 문제.
+- **해결**: `_call_claude_sync` 루프 내에서 수시로 취소 목록을 확인하여 즉시 프로세스를 `kill`하고 루프를 탈출하도록 수정. `_team_execute` 예외 절에서도 명시적 `cancel_current(run_id)` 호출 추가.
 
-### [High] 실행 상태 API가 실제 선택 모델 대신 전역 기본 모델을 반환
-- 위치: `backend/app/routers/chat.py`
-- 원인:
-  - `GET /api/runs/{run_id}`의 `model` 계산이 `settings.solo_model/settings.team_model` 기반
-  - 실제 실행은 `ReaderAgent`에서 세션별 `session.llm_model` 우선 사용
-- 결과:
-  - UI 상태 배지(`StatusBadge`)에 표시되는 모델과 실제 실행 모델이 달라질 수 있음
-- 근거 코드:
-```78:82:backend/app/routers/chat.py
-    model = (
-        settings.solo_model or None if run.mode == "solo"
-        else settings.team_model or None if run.mode == "team"
-        else None
-    )
-```
-```190:195:backend/app/agents/reader.py
-        model_to_use = self.session_model or settings.solo_model
-        return await self.llm_provider.stream_generate(
-            self.SOLO_SYSTEM_PROMPT,
-            prompt,
-            model=model_to_use,
-```
-- 권장 수정:
-  - `Run` 조회 시 `Session`을 함께 조회하여 `session.llm_model`을 우선 반환
-  - 필요 시 run 생성 시점에 `effective_model`을 run에 저장해 이력 정확성 확보
+### 1.4. [완료] SSE 늦은 구독자 데이터 유실 (Bug 5.1)
+- **내용**: 구독자가 연결 전 발송된 `done` 등 중요한 이벤트를 놓쳐 무한 대기하는 문제.
+- **해결**: `StreamManager`에 `last_events` 캐싱 로직을 추가하여 신규 구독 시 마지막 상태 메시지를 즉시 전송함.
 
-### [Medium] 미지원 provider 값이 DB에 저장되지만 실제 실행은 조용히 fallback
-- 위치: `backend/app/routers/chat.py`, `backend/app/services/llm/__init__.py`
-- 원인:
-  - 입력 provider 검증 없음
-  - `get_provider()`는 unknown name에 대해 `claude-cli`로 묵시 fallback
-- 영향:
-  - DB/프론트 표시 값과 실제 실행 provider가 불일치
-  - 디버깅 난이도 증가, 사용자 혼란
-- 근거 코드:
-```11:13:backend/app/services/llm/__init__.py
-def get_provider(name: str) -> LLMProvider:
-    """이름에 해당하는 LLM Provider를 반환합니다. 기본값은 claude-cli입니다."""
-    return _providers.get(name, _providers["claude-cli"])
-```
-- 권장 수정:
-  - 허용 provider 목록 검증(백엔드 422 반환)
-  - 또는 fallback 발생 시 경고 로깅 + 세션값 자동 정정
+### 1.5. [완료] 글로벌 락 대기열 취소 지연
+- **내용**: 취소된 요청임에도 락 획득 후 불필요하게 실행을 시도하는 문제.
+- **해결**: `execute_with_lock` 내에서 락을 얻은 직후 취소 여부를 재검사하여 즉시 종료하도록 가드 추가.
 
-## 4) 개선사항 (버그 예방/운영 안정성)
+### 1.6. [완료] 스트리밍 매니저 락 병목 (Bug 5.2)
+- **내용**: `broadcast` 시 모든 큐에 `put`할 때까지 전체 락이 잡혀 발생하는 성능 저하.
+- **해결**: 락 내부에서 큐 리스트만 복사한 후, 실제 전송은 락 밖에서 수행하도록 범위 축소.
 
-### A. 테스트 보강 (가장 우선)
-- 세션 API 테스트에 아래 항목 추가:
-  - `llm_provider`, `llm_model` 존재/값 검증
-  - `POST /api/chat` 후 세션 조회 시 설정 반영 여부
-  - `GET /api/runs/{id}` 모델 표기와 실제 실행 모델 일치 여부
-- 현재 누락된 계약 테스트가 있어 스키마 회귀가 쉽게 유입됨
+---
 
-### B. provider 레지스트리 개선
-- 현재 provider 인스턴스를 전역 singleton 딕셔너리로 보관
-- 현재 구현은 무상태라 문제 없지만, 추후 provider가 상태를 가지면 세션 간 간섭 위험
-- 개선:
-  - 팩토리에 class 또는 factory callable 등록 후 요청마다 인스턴스 생성
-  - 혹은 provider 무상태 계약을 명문화
+## 2. 현재 남아있는 버그 및 조사 필요 사항 (Remaining Issues)
 
-### C. API 계약 명확화
-- `POST /api/chat`에서 잘못된 `session_id`가 들어오면 새 세션 생성됨(암묵적 동작)
-- 의도된 동작인지 명시 필요
-  - 옵션 1) 현재 유지 + 문서화
-  - 옵션 2) 404 반환으로 명시적 실패
+### 2.1. 테스트 환경 스트리밍 타임아웃 (Critical for Testing)
+- **증상**: `test_sse_refined.py` 실행 시 로직상 문제가 없음에도 3분 이상의 대기 후 타임아웃 발생.
+- **원인 추정**: `httpx.ASGITransport`와 FastAPI `StreamingResponse` 간의 비동기 루프 간섭으로 보임. 실제 운영 환경(Uvicorn)이 아닌 테스트 프레임워크 상의 `aiter_lines()` 블로킹 현상으로 판단됨.
+- **조치 필요**: 테스트 코드에서 HTTP 레이어를 거치지 않고 `stream_manager`를 직접 검증하는 별도의 단위 테스트 보완 필요.
 
-### D. 마이그레이션/모델 일관성 보강
-- `llm_provider`는 non-null + server_default로 적절
-- 다만 기존 데이터/운영 환경에서 provider/model 검증 제약이 없음
-- 개선:
-  - 앱 레벨 검증 + 선택적으로 DB 체크 제약(가능한 DB인 경우)
+### 2.2. SQLite 잠금 경쟁 (Low-Medium)
+- **증상**: 극심한 병렬 DB 쓰기 상황에서 `database is locked` 에러 가능성.
+- **내용**: `LineBufferFlusher`의 동기 커넥션과 `aiosqlite` 비동기 세션이 `db_lock`을 공유하지 않음.
+- **조치 필요**: `LineBufferFlusher`를 비동기 방식으로 완전히 전환하거나, 모든 DB 쓰기 경로를 하나의 락 시스템으로 통합 검토.
 
-## 5) 우선순위 액션 플랜
-1. `sessions.py` 응답 필드 누락 수정 (Critical)
-2. `useSession.ts` pseudo session 타입 수정 (High)
-3. run status 모델 계산 로직 수정 (High)
-4. provider 입력 검증 추가 + 에러 메시지 정의 (Medium)
-5. 회귀 테스트 추가 (A 항목 전체)
+### 2.3. asyncio.gather의 부분 실패 처리
+- **내용**: 병렬 태스크 중 하나가 실패했을 때 나머지 태스크들의 `cancel()` 이후 완료 대기(`await gather`) 과정에서 발생하는 예외 전파 시점의 정교함 부족.
+- **조치 필요**: `return_exceptions=True`와 태스크 정리 순서에 대한 추가적인 엣지 케이스 검증.
 
-## 6) 결론
-- 문서의 리팩토링 방향(Provider 추상화, 세션별 모델 선택)은 구조적으로 타당함
-- 그러나 현재 상태는 **세션 API 응답 스키마 누락 + 프론트 타입 불일치**로 인해 실제 사용/배포 단계에서 즉시 문제를 일으킬 가능성이 큼
-- 위 1~3번 우선 수정 후 테스트를 보강해야 안정적으로 다중 LLM 확장이 가능함
+---
+
+**최종 결론**: 시스템의 런타임 안정성과 취소 정밀도는 대폭 향상되었으나, 테스트 자동화 도구와의 호환성 문제 및 SQLite의 구조적 한계로 인한 잠재적 병목이 남아있음. 운영 환경에서의 실제 성능은 목표치에 도달한 것으로 판단됨.

@@ -119,6 +119,21 @@ async def update_run_status(
             setattr(run, key, value)
     await db.commit()
     await db.refresh(run)
+
+    # 실시간 스트리밍 업데이트 전송
+    try:
+        from app.services.stream_service import stream_manager
+        await stream_manager.broadcast(run_id, {
+            "type": "status",
+            "run_id": run_id,
+            "status": status,
+            "progress": run.progress,
+            "mode": run.mode,
+            "finished_at": run.finished_at.isoformat() if run.finished_at else None
+        })
+    except Exception:
+        pass
+
     return run
 
 
@@ -157,6 +172,25 @@ async def create_agent_message(
     db.add(msg)
     await db.commit()
     await db.refresh(msg)
+
+    # 실시간 스트리밍 업데이트 전송 (에이전트 생성)
+    try:
+        from app.services.stream_service import stream_manager
+        await stream_manager.broadcast(run_id, {
+            "type": "agent_message_created",
+            "run_id": run_id,
+            "agent_message": {
+                "id": msg.id,
+                "sender": msg.sender,
+                "role_preset": msg.role_preset,
+                "status": msg.status,
+                "content": msg.content,
+                "created_at": msg.created_at.isoformat()
+            }
+        })
+    except Exception:
+        pass
+
     return msg
 
 
@@ -170,6 +204,19 @@ async def update_agent_message_content(
     msg.content = content
     await db.commit()
     await db.refresh(msg)
+
+    # 실시간 스트리밍 업데이트 전송 (내용 업데이트)
+    try:
+        from app.services.stream_service import stream_manager
+        await stream_manager.broadcast(msg.run_id, {
+            "type": "content",
+            "run_id": msg.run_id,
+            "agent": msg.sender,
+            "content": msg.content
+        })
+    except Exception:
+        pass
+
     return msg
 
 
@@ -183,6 +230,19 @@ async def update_agent_message_status(
     msg.status = status
     await db.commit()
     await db.refresh(msg)
+
+    # 실시간 스트리밍 업데이트 전송 (상태 변경)
+    try:
+        from app.services.stream_service import stream_manager
+        await stream_manager.broadcast(msg.run_id, {
+            "type": "agent_status_changed",
+            "run_id": msg.run_id,
+            "agent_message_id": msg.id,
+            "status": status
+        })
+    except Exception:
+        pass
+
     return msg
 
 

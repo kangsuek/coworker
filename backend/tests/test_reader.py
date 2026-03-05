@@ -9,6 +9,7 @@ import pytest
 
 from app.agents.reader import ReaderAgent, _build_conversation_prompt
 from app.models.db import Run
+from app.models.schemas import AgentPlan, ClassificationResult
 from app.services.session_service import create_run, create_session, create_user_message
 
 
@@ -156,3 +157,61 @@ async def test_conversation_history_passed_to_cli(db):
     assert "더 자세히 설명해줘" in prompt, "현재 질문이 프롬프트에 포함되어야 함"
     # 현재 메시지는 이력 섹션이 아닌 [현재 질문] 섹션에 있어야 함
     assert "[현재 질문]" in prompt
+
+
+@pytest.mark.asyncio
+async def test_summarize_history_triggers_when_too_long(db):
+    """대화 이력이 3000자 초과 시 요약 CLI 호출 확인."""
+    agent = ReaderAgent(db)
+    from app.services.llm import get_provider
+    agent.llm_provider = get_provider("claude-cli")
+    agent.session_model = None
+
+    class FakeMsg:
+        def __init__(self, role, content):
+            self.role = role
+            self.content = content
+
+    # 3000자 넘는 이력 생성
+    long_history = [
+        FakeMsg("user", "A" * 1600),
+        FakeMsg("reader", "B" * 1600),
+    ]
+
+    with patch.object(agent, "_summarize_history", new_callable=AsyncMock) as mock_sum:
+        mock_sum.return_value = "요약된 히스토리"
+        
+        # _team_execute 내부에서 사용할 히스토리 처리 로직 검증을 위해 
+        # _team_execute를 직접 호출하거나 내부 로직을 테스트
+        # 여기서는 _summarize_history 호출 여부만 먼저 확인하는 단위 테스트 작성
+        
+        session = await create_session(db)
+        # DB에 긴 메시지 저장
+        await create_user_message(db, session.id, "user", "A" * 1600)
+        await create_user_message(db, session.id, "reader", "B" * 1600)
+        
+        current_msg = "질문"
+        user_msg = await create_user_message(db, session.id, "user", current_msg)
+        run = await create_run(db, session.id, user_msg.id)
+        
+        classification = ClassificationResult(
+            mode="team", reason="테스트", agents=[AgentPlan(role="Researcher", task="T")]
+        )
+        
+        with (
+            patch("app.agents.reader.update_run_status", new_callable=AsyncMock),
+            patch("app.agents.reader.create_user_message", new_callable=AsyncMock),
+            patch.object(agent, "_assemble_context", new_callable=AsyncMock, return_value=None),
+            patch.object(agent, "_integrate_results", new_callable=AsyncMock, return_value="통합"),
+            patch("app.agents.reader.create_agent_message", new_callable=AsyncMock),
+            patch("app.agents.reader.update_agent_message_content", new_callable=AsyncMock),
+            patch("app.agents.reader.update_agent_message_status", new_callable=AsyncMock),
+            patch("app.agents.sub_agent.SubAgent.execute", new_callable=AsyncMock) as mock_exec,
+        ):
+            await agent._team_execute(classification, current_msg, session.id, run.id)
+            
+        mock_sum.assert_called_once()
+        # 에이전트에게 요약된 히스토리가 전달되어야 함
+        args, _ = mock_exec.call_args
+        context = args[1]
+        assert "요약된 히스토리" in context

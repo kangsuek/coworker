@@ -52,10 +52,11 @@ def classify_message(user_message: str) -> ClassificationResult:
     numbered_items = [t.strip().strip(",").strip() for t in raw_items if t.strip()]
 
     # 에이전트 구성 (최대 5개)
-    agents: list[AgentPlan] = [
-        AgentPlan(role=_role_for_task(task), task=task)
-        for task in numbered_items[:5]
-    ]
+    agents: list[AgentPlan] = []
+    for i, task in enumerate(numbered_items[:5]):
+        # 기본적으로 순차적 의존성(Sequential) 설정: i번은 i-1번에 의존
+        deps = [i - 1] if i > 0 else []
+        agents.append(AgentPlan(role=_role_for_task(task), task=task, depends_on=deps))
 
     if len(agents) < 2:
         return ClassificationResult(

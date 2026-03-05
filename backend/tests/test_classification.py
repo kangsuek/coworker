@@ -365,3 +365,20 @@ def test_classify_five_items_capped():
     result = classify_message(msg)
     assert result.mode == "team"
     assert len(result.agents) == 5
+    roles = {a.role for a in result.agents}
+    assert roles == {"Researcher", "Coder", "Reviewer", "Writer", "Planner"}
+
+
+def test_classify_dependencies_sequential():
+    """규칙 기반 분류 시 기본적으로 순차적 의존성(Sequential)이 생성되는지 검증."""
+    msg = "(팀모드) 1. 조사 2. 설계 3. 구현"
+    result = classify_message(msg)
+    assert result.mode == "team"
+    assert len(result.agents) == 3
+    
+    # 0번: 의존성 없음
+    assert result.agents[0].depends_on == []
+    # 1번: 0번에 의존
+    assert result.agents[1].depends_on == [0]
+    # 2번: 1번에 의존
+    assert result.agents[2].depends_on == [1]

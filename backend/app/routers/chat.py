@@ -1,4 +1,7 @@
+import asyncio
+
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.reader import ReaderAgent
@@ -22,6 +25,7 @@ from app.services.session_service import (
     get_session,
     update_run_status,
 )
+from app.services.stream_service import stream_manager
 
 router = APIRouter(tags=["chat"])
 
@@ -137,3 +141,36 @@ async def cancel_run(run_id: str, db: AsyncSession = Depends(get_db)):
 
     final_status = "cancelled" if run.status in _CANCELLABLE_STATUSES else run.status
     return {"run_id": run_id, "status": final_status}
+
+
+@router.get("/runs/{run_id}/stream")
+async def run_stream(run_id: str):
+    """실시간 상태 및 에이전트 출력 스트리밍 엔드포인트."""
+
+    async def event_generator():
+        # 구독 시작
+        queue = await stream_manager.subscribe(run_id)
+        # 연결 직후 한 번 전송해 클라이언트가 응답/스트림을 즉시 수신하도록 함 (테스트·프록시 호환)
+        yield "data: {\"type\":\"connected\",\"run_id\":\"" + run_id + "\"}\n\n"
+        try:
+            while True:
+                # 큐에서 새로운 메시지 대기
+                data = await queue.get()
+                # SSE 포맷으로 데이터 전송
+                yield f"data: {data}\n\n"
+        except asyncio.CancelledError:
+            # 클라이언트 연결 종료 시 구독 해제
+            await stream_manager.unsubscribe(run_id, queue)
+        except Exception:
+            await stream_manager.unsubscribe(run_id, queue)
+            raise
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",  # Nginx 버퍼링 방지
+        },
+    )

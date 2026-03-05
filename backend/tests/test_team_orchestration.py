@@ -210,6 +210,54 @@ async def test_team_execute_records_agent_messages(db):
 
 
 @pytest.mark.asyncio
+async def test_team_execute_parallel_performance(db):
+    """의존성 없는 태스크들이 병렬로 실행되어 전체 시간이 단축되는지 확인."""
+    import asyncio
+    import time
+
+    session = await create_session(db)
+    user_msg = await create_user_message(db, session.id, "user", "병렬 테스트")
+    run = await create_run(db, session.id, user_msg.id)
+
+    # 의존성 없는 2개 태스크 (둘 다 depends_on=[])
+    classification = ClassificationResult(
+        mode="team",
+        reason="병렬 가능",
+        agents=[
+            AgentPlan(role="Researcher", task="태스크 1", depends_on=[]),
+            AgentPlan(role="Coder", task="태스크 2", depends_on=[]),
+        ],
+    )
+
+    async def slow_execute(task, context, on_line, model=""):
+        await asyncio.sleep(0.2)  # 0.2초 대기
+        return f"{task} 완료"
+
+    agent = ReaderAgent(db)
+    from app.services.llm import get_provider
+    agent.llm_provider = get_provider("claude-cli")
+    agent.session_model = None
+
+    with (
+        patch("app.agents.reader.update_run_status", new_callable=AsyncMock),
+        patch("app.agents.reader.create_user_message", new_callable=AsyncMock),
+        patch.object(agent, "_assemble_context", new_callable=AsyncMock, return_value=None),
+        patch.object(agent, "_integrate_results", new_callable=AsyncMock, return_value="통합"),
+        patch("app.agents.reader.create_agent_message", new_callable=AsyncMock),
+        patch("app.agents.reader.update_agent_message_content", new_callable=AsyncMock),
+        patch("app.agents.reader.update_agent_message_status", new_callable=AsyncMock),
+        patch("app.agents.sub_agent.SubAgent.execute", side_effect=slow_execute),
+    ):
+        start_time = time.perf_counter()
+        await agent._team_execute(classification, "병렬 테스트", session.id, run.id)
+        duration = time.perf_counter() - start_time
+
+    # 순차 실행 시 최소 0.4초(0.2 * 2)가 걸려야 함.
+    # 병렬 실행 시 0.4초보다 훨씬 적게(약 0.2~0.3초 사이) 걸려야 함.
+    assert duration < 0.35, f"실행 시간이 너무 김: {duration:.4f}s (병렬화 안 된 것으로 보임)"
+
+
+@pytest.mark.asyncio
 async def test_team_execute_sub_agent_exception_sets_error_status(db):
     """Sub-Agent 실행 중 Exception → agent_message status 'error' + 예외 전파."""
     session = await create_session(db)
@@ -250,6 +298,60 @@ async def test_team_execute_sub_agent_exception_sets_error_status(db):
 
     error_calls = [c for c in mock_update_status.call_args_list if "error" in c.args]
     assert len(error_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_team_execute_includes_history_in_context(db):
+    """Team 실행 시 이전 대화 이력이 SubAgent 컨텍스트에 포함되는지 확인."""
+    session = await create_session(db)
+    # 이전 대화 생성
+    await create_user_message(db, session.id, "user", "첫 번째 질문")
+    await create_user_message(db, session.id, "reader", "첫 번째 답변")
+    
+    # 현재 요청
+    current_message = "두 번째 질문 (팀 작업 필요)"
+    user_msg = await create_user_message(db, session.id, "user", current_message)
+    run = await create_run(db, session.id, user_msg.id)
+
+    classification = ClassificationResult(
+        mode="team",
+        reason="복잡함",
+        agents=[AgentPlan(role="Researcher", task="리서치")],
+        user_status_message=None,
+    )
+
+    captured_contexts: list[str] = []
+
+    async def fake_execute(task, context, on_line, model=""):
+        if context:
+            captured_contexts.append(context)
+        return "결과"
+
+    agent = ReaderAgent(db)
+    from app.services.llm import get_provider
+    agent.llm_provider = get_provider("claude-cli")
+    agent.session_model = None
+    
+    with (
+        patch("app.agents.reader.update_run_status", new_callable=AsyncMock),
+        patch("app.agents.reader.create_user_message", new_callable=AsyncMock),
+        patch.object(agent, "_assemble_context", new_callable=AsyncMock, return_value=None),
+        patch.object(agent, "_integrate_results", new_callable=AsyncMock, return_value="통합"),
+        patch("app.agents.reader.create_agent_message", new_callable=AsyncMock) as mock_create_am,
+        patch("app.agents.reader.update_agent_message_content", new_callable=AsyncMock),
+        patch("app.agents.reader.update_agent_message_status", new_callable=AsyncMock),
+    ):
+        mock_am = MagicMock()
+        mock_am.id = "test-id"
+        mock_create_am.return_value = mock_am
+
+        with patch("app.agents.sub_agent.SubAgent.execute", side_effect=fake_execute):
+            await agent._team_execute(classification, current_message, session.id, run.id)
+
+    # 이전 대화 내용이 context에 포함되어 있어야 함
+    assert len(captured_contexts) > 0
+    assert "첫 번째 질문" in captured_contexts[0]
+    assert "첫 번째 답변" in captured_contexts[0]
 
 
 @pytest.mark.asyncio

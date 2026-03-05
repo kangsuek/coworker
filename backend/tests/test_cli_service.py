@@ -194,15 +194,14 @@ async def test_global_lock_sequential_execution():
 
 @pytest.mark.asyncio
 async def test_cancel_current_kills_process_group():
-    """cancel_current 호출 시 os.killpg(pgid, SIGTERM) 실행 확인."""
+    """cancel_current 호출 시 모든 활성 프로세스에 대해 os.killpg(pgid, SIGTERM) 실행 확인."""
     import app.services.cli_service as mod
 
     mock_proc = MagicMock()
     mock_proc.poll.return_value = None  # 아직 실행 중
     mock_proc.pid = 99999
 
-    original = mod._current_proc
-    mod._current_proc = mock_proc
+    mod._active_procs.add(mock_proc)
     try:
         with (
             patch("os.killpg") as mock_killpg,
@@ -211,17 +210,14 @@ async def test_cancel_current_kills_process_group():
             await cancel_current()
         mock_killpg.assert_called_once_with(99999, signal.SIGTERM)
     finally:
-        mod._current_proc = original
+        if mock_proc in mod._active_procs:
+            mod._active_procs.remove(mock_proc)
 
 
 @pytest.mark.asyncio
 async def test_cancel_current_handles_no_process():
-    """_current_proc이 None일 때 cancel_current가 예외 없이 반환."""
+    """활성 프로세스가 없을 때 cancel_current가 예외 없이 반환."""
     import app.services.cli_service as mod
 
-    original = mod._current_proc
-    mod._current_proc = None
-    try:
-        await cancel_current()  # 예외 없이 정상 반환
-    finally:
-        mod._current_proc = original
+    mod._active_procs.clear()
+    await cancel_current()  # 예외 없이 정상 반환

@@ -118,6 +118,7 @@ class SessionDetail(BaseModel):
 class AgentPlan(BaseModel):
     role: Literal["Researcher", "Coder", "Reviewer", "Writer", "Planner"]
     task: str
+    depends_on: list[int] = []
 
 
 class ClassificationResult(BaseModel):
