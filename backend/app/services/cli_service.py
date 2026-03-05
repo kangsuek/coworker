@@ -22,8 +22,7 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 _active_procs: set[subprocess.Popen] = set()
-_cli_lock = asyncio.Lock()
-# 특정 run_id의 취소 상태를 추적 (전역 플래그 대신 집합 사용)
+# 특정 run_id의 취소 상태를 추적
 _cancelled_runs: set[str] = set()
 
 
@@ -145,12 +144,11 @@ async def call_claude_streaming(
 
 
 async def execute_with_lock(coro, run_id: str | None = None):
-    """Lock 획득 후 코루틴 실행. 락 획득 직후 취소 여부 확인."""
-    async with _cli_lock:
-        if run_id and run_id in _cancelled_runs:
-            logger.info("Lock 획득했으나 이미 취소된 Run: run_id=%s", run_id)
-            raise RuntimeError(f"Run {run_id} was cancelled while waiting for lock")
-        return await coro
+    """실행 전 취소 여부 확인 후 코루틴 실행. (이전의 전역 락은 제거됨)"""
+    if run_id and run_id in _cancelled_runs:
+        logger.info("이미 취소된 Run: run_id=%s", run_id)
+        raise RuntimeError(f"Run {run_id} was cancelled")
+    return await coro
 
 
 async def cancel_current(run_id: str | None = None):

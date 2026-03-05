@@ -13,6 +13,16 @@ import pytest
 
 from app.services.classification import classify_message, parse_classification
 
+
+@pytest.fixture(autouse=True)
+def mock_llm_classification(monkeypatch):
+    """LLM 분류 단계를 mock하여 규칙 기반 결과만 반환하도록 설정."""
+
+    async def mock_classify(user_message, current_agents):
+        return current_agents
+
+    monkeypatch.setattr("app.services.classification._classify_with_llm", mock_classify)
+
 # ═══════════════════════════════════════════════════════════════════════
 # 기존 폴백 체인 테스트
 # ═══════════════════════════════════════════════════════════════════════
@@ -292,64 +302,64 @@ def test_cli_json_wrapper_with_solo():
 # ═══════════════════════════════════════════════════════════════════════
 
 
-def test_classify_simple_greeting_is_solo():
+async def test_classify_simple_greeting_is_solo():
     """단순 인사 → solo."""
-    result = classify_message("안녕하세요!")
+    result = await classify_message("안녕하세요!")
     assert result.mode == "solo"
     assert result.agents == []
 
 
-def test_classify_simple_question_is_solo():
+async def test_classify_simple_question_is_solo():
     """단순 질문 → solo."""
-    result = classify_message("Python에서 리스트를 정렬하는 방법을 알려줘.")
+    result = await classify_message("Python에서 리스트를 정렬하는 방법을 알려줘.")
     assert result.mode == "solo"
 
 
-def test_classify_two_numbered_items_is_solo():
+async def test_classify_two_numbered_items_is_solo():
     """번호 목록 2개 + 헤더 없음 → solo."""
-    result = classify_message("1. 조사 2. 분석")
+    result = await classify_message("1. 조사 2. 분석")
     assert result.mode == "solo"
 
 
-def test_classify_three_numbered_items_without_header_is_solo():
+async def test_classify_three_numbered_items_without_header_is_solo():
     """번호 목록만으로는 team 전환 불가 (헤더 없음) → solo."""
-    result = classify_message("1. 시장 조사 2. 기술 설계 3. 마케팅 계획")
+    result = await classify_message("1. 시장 조사 2. 기술 설계 3. 마케팅 계획")
     assert result.mode == "solo"
 
 
-def test_classify_keyword_alone_is_solo():
+async def test_classify_keyword_alone_is_solo():
     """키워드만으로는 team 전환 불가 (헤더 없음) → solo."""
-    result = classify_message("1. 시장 조사, 2. 마케팅을 각각 전문가가 작성해줘.")
+    result = await classify_message("1. 시장 조사, 2. 마케팅을 각각 전문가가 작성해줘.")
     assert result.mode == "solo"
 
 
-def test_classify_header_triggers_team_with_numbered_items():
+async def test_classify_header_triggers_team_with_numbered_items():
     """헤더 + 번호 목록 2개 이상 → team."""
-    result = classify_message("(팀모드) 1. 시장 조사 2. 마케팅 전략")
+    result = await classify_message("(팀모드) 1. 시장 조사 2. 마케팅 전략")
     assert result.mode == "team"
     assert len(result.agents) == 2
 
 
-def test_classify_header_without_numbered_items_is_solo():
+async def test_classify_header_without_numbered_items_is_solo():
     """헤더로 시작하지만 번호 목록 없음 → solo fallback."""
-    result = classify_message("(팀모드) 전체 마케팅 전략을 수립해줘")
+    result = await classify_message("(팀모드) 전체 마케팅 전략을 수립해줘")
     assert result.mode == "solo"
 
 
-def test_classify_header_with_one_item_is_solo():
+async def test_classify_header_with_one_item_is_solo():
     """헤더 + 번호 목록 1개 → solo fallback (에이전트 2개 미만)."""
-    result = classify_message("(팀모드) 1. 시장 조사")
+    result = await classify_message("(팀모드) 1. 시장 조사")
     assert result.mode == "solo"
 
 
-def test_classify_startup_business_plan_is_team():
+async def test_classify_startup_business_plan_is_team():
     """헤더 + 번호 목록 4개 → team 4개 에이전트."""
     msg = (
         "(팀모드) AI 스타트업 사업 계획서를 작성해줘. "
         "1. 시장 조사, 2. 기술 아키텍처 설계, 3. 투자 유치 전략, "
         "4. 마케팅 계획을 작성해줘."
     )
-    result = classify_message(msg)
+    result = await classify_message(msg)
     assert result.mode == "team"
     assert len(result.agents) == 4
     roles = [a.role for a in result.agents]
@@ -359,20 +369,20 @@ def test_classify_startup_business_plan_is_team():
     assert roles[3] == "Writer"       # 마케팅 계획
 
 
-def test_classify_five_items_capped():
+async def test_classify_five_items_capped():
     """헤더 + 6개 번호 항목 → 최대 5개 에이전트."""
     msg = "(팀모드) 1. 조사 2. 설계 3. 구현 4. 테스트 5. 문서 6. 배포"
-    result = classify_message(msg)
+    result = await classify_message(msg)
     assert result.mode == "team"
     assert len(result.agents) == 5
     roles = {a.role for a in result.agents}
     assert roles == {"Researcher", "Coder", "Reviewer", "Writer", "Planner"}
 
 
-def test_classify_dependencies_sequential():
+async def test_classify_dependencies_sequential():
     """규칙 기반 분류 시 기본적으로 순차적 의존성(Sequential)이 생성되는지 검증."""
     msg = "(팀모드) 1. 조사 2. 설계 3. 구현"
-    result = classify_message(msg)
+    result = await classify_message(msg)
     assert result.mode == "team"
     assert len(result.agents) == 3
     

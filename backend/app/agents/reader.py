@@ -191,7 +191,7 @@ class ReaderAgent:
         2차 CLI 판정을 제거해 분류 지연(3~15초)과 _cli_lock 선점 문제를 해소한다.
         Team 트리거는 TEAM_TRIGGER_KEYWORDS 환경변수로 코드 수정 없이 확장 가능.
         """
-        result = classify_message(user_message)
+        result = await classify_message(user_message)
         logger.info("_classify (rule-based): mode=%s agents=%s", result.mode, result.agents)
         return result
 

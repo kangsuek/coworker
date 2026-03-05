@@ -127,3 +127,8 @@ class ClassificationResult(BaseModel):
     reason: str
     agents: list[AgentPlan] = []
     user_status_message: str | None = None
+
+
+class LLMClassificationResponse(BaseModel):
+    """LLM이 각 태스크의 역할과 의존성을 분석한 결과."""
+    agents: list[AgentPlan]

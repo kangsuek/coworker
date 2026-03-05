@@ -12,7 +12,8 @@ import re
 from pydantic import ValidationError
 
 from app.config import settings
-from app.models.schemas import AgentPlan, ClassificationResult
+from app.models.schemas import AgentPlan, ClassificationResult, LLMClassificationResponse
+from app.services.llm import get_provider
 
 # ── 규칙 기반 분류 ──────────────────────────────────────────────────────────
 
@@ -28,13 +29,80 @@ def _role_for_task(task: str) -> str:
     return "Researcher"
 
 
-def classify_message(user_message: str) -> ClassificationResult:
-    """규칙 기반 Solo/Team 분류. CLI 호출 없이 즉시 결정.
+async def _classify_with_llm(user_message: str, current_agents: list[AgentPlan]) -> list[AgentPlan]:
+    """LLM을 사용하여 태스크의 역할과 의존성을 정교화합니다."""
+    # LLM 프로바이더 획득 (기본값: gemini-cli)
+    provider = get_provider("gemini-cli")
 
-    판정 기준:
-    - TEAM_TRIGGER_HEADER 값으로 시작하는 메시지 → team 시도
-      - 헤더 이후 번호 목록 2개 이상이면 team, 미만이면 solo fallback
-    - 그 외 → solo
+    # 가용한 역할 목록 및 설명
+    role_info = "\n".join([f"- {role}: {keywords}" for role, keywords in [
+        ("Researcher", settings.role_researcher_keywords),
+        ("Writer", settings.role_writer_keywords),
+        ("Planner", settings.role_planner_keywords),
+        ("Coder", settings.role_coder_keywords),
+        ("Reviewer", settings.role_reviewer_keywords),
+    ]])
+
+    # 태스크 리스트 포맷팅
+    tasks_str = "\n".join([f"{i}. {a.task}" for i, a in enumerate(current_agents)])
+
+    system_prompt = f"""당신은 멀티 에이전트 시스템의 Planner입니다. 사용자의 요청과 태스크 목록을 분석하여 각 태스크에 가장 적합한 'role'과 'depends_on'을 JSON으로 응답하십시오.
+
+[역할 정의]
+{role_info}
+
+[의존성 규칙]
+- 앞선 태스크의 결과가 필요한 경우 해당 인덱스(0부터 시작)를 'depends_on'에 추가.
+- 단순 순차 작업이 아닌 실제 데이터 흐름에 따라 설정.
+
+[출력 형식]
+{{"agents": [{{ "role": "역할", "task": "내용", "depends_on": [인덱스] }}]}}
+다른 설명 없이 JSON만 반환하십시오."""
+
+    user_prompt = f"사용자 메시지: {user_message}\n태스크 목록:\n{tasks_str}"
+
+    try:
+        # LLM 호출
+        raw_response = await provider.stream_generate(
+            system_prompt=system_prompt,
+            user_message=user_prompt,
+        )
+
+        # JSON 추출 및 파싱
+        # (주의: _extract_json_objects는 이 파일 하단에 정의됨)
+        candidates = _extract_json_objects(raw_response)
+        
+        for candidate in candidates:
+            try:
+                data = json.loads(candidate)
+                # LLMClassificationResponse를 통한 검증 및 인스턴스화
+                response_obj = LLMClassificationResponse(**data)
+                
+                # 결과 반영
+                num_tasks = len(current_agents)
+                for agent in response_obj.agents:
+                    # 인덱스가 범위를 벗어나지 않도록 필터링
+                    agent.depends_on = [idx for idx in agent.depends_on if 0 <= idx < num_tasks]
+                
+                # 원본 태스크 내용이 LLM에 의해 변조되었을 경우를 대비해 순서대로 매칭 (옵션)
+                # 여기서는 LLM이 반환한 agents 리스트를 신뢰함
+                return response_obj.agents
+            except (json.JSONDecodeError, ValidationError):
+                continue
+
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"LLM Classification failed: {e}")
+        raise
+
+    return current_agents
+
+
+async def classify_message(user_message: str) -> ClassificationResult:
+    """Solo/Team 분류 및 지능형 태스크 분석.
+
+    1. 규칙 기반으로 Solo/Team 결정 및 1차 태스크 분할.
+    2. Team 모드일 경우 LLM을 통해 역할(Role) 및 의존성(Dependency) 강화.
     """
     header = settings.team_trigger_header.strip()
 
@@ -46,17 +114,16 @@ def classify_message(user_message: str) -> ClassificationResult:
             user_status_message=None,
         )
 
-    # 헤더 이후 텍스트에서 번호 목록 추출: "1. task", "1) task", "2.task" 형태
+    # 헤더 이후 텍스트에서 번호 목록 추출
     body = user_message[len(header):].strip()
     raw_items = re.findall(r"\d+[.)]\s*(.+?)(?=,?\s*\d+[.)]|$|\n)", body)
     numbered_items = [t.strip().strip(",").strip() for t in raw_items if t.strip()]
 
-    # 에이전트 구성 (최대 5개)
+    # 1차 에이전트 구성 (최대 5개, 기본적으로 순차적)
     agents: list[AgentPlan] = []
     for i, task in enumerate(numbered_items[:5]):
-        # 기본적으로 순차적 의존성(Sequential) 설정: i번은 i-1번에 의존
-        deps = [i - 1] if i > 0 else []
-        agents.append(AgentPlan(role=_role_for_task(task), task=task, depends_on=deps))
+        depends_on = [i - 1] if i > 0 else []
+        agents.append(AgentPlan(role=_role_for_task(task), task=task, depends_on=depends_on))
 
     if len(agents) < 2:
         return ClassificationResult(
@@ -65,6 +132,14 @@ def classify_message(user_message: str) -> ClassificationResult:
             agents=[],
             user_status_message=None,
         )
+
+    # 2단계: LLM을 통한 역할 및 의존성 강화
+    try:
+        enhanced_agents = await _classify_with_llm(user_message, agents)
+        agents = enhanced_agents
+    except Exception:
+        # LLM 실패 시 1차 구성(규칙 기반) 유지 (Fallback)
+        pass
 
     return ClassificationResult(
         mode="team",
