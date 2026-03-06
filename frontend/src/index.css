@@ -4,3 +4,13 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 @import "highlight.js/styles/github.css";
+
+@layer utilities {
+  .scrollbar-hide {
+    -ms-overflow-style: none; /* IE and Edge */
+    scrollbar-width: none; /* Firefox */
+  }
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none; /* Chrome, Safari and Opera */
+  }
+}

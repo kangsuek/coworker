@@ -1,3 +1,4 @@
+import { Sun, Moon, Trash2, Plus, X } from 'lucide-react'
 import type { Session } from '../../types/api'
 
 interface Props {
@@ -8,9 +9,7 @@ interface Props {
   onDeleteSession: (id: string) => void
   theme: 'light' | 'dark'
   onThemeToggle: () => void
-  collapsed: boolean
-  onCollapse: () => void
-  onExpand: () => void
+  onCloseMobile?: () => void
 }
 
 function formatDate(iso: string): string {
@@ -32,134 +31,85 @@ export default function SessionList({
   onDeleteSession,
   theme,
   onThemeToggle,
-  collapsed,
-  onCollapse,
-  onExpand,
+  onCloseMobile,
 }: Props) {
-  if (collapsed) {
-    return (
-      <aside className="w-full min-w-0 min-h-0 h-full border-r border-gray-200 dark:border-white/10 bg-white dark:bg-[#141414] flex flex-col shrink-0 overflow-hidden">
-        <div className="h-8 flex items-center justify-center border-b border-gray-200 dark:border-white/10 shrink-0">
-          <button
-            type="button"
-            onClick={onExpand}
-            className="p-2 rounded hover:bg-gray-100 dark:hover:bg-white/5 transition-colors text-gray-600 dark:text-gray-400"
-            title="세션 목록 펼치기"
-            aria-label="세션 목록 펼치기"
-          >
-            <span className="text-lg" aria-hidden>«</span>
-          </button>
-        </div>
-        <div className="flex-1 flex items-center justify-center p-1">
-          <button
-            type="button"
-            onClick={onExpand}
-            className="rounded hover:bg-gray-100 dark:hover:bg-white/5 p-1.5 text-gray-500 dark:text-gray-400"
-            title="세션 목록 펼치기"
-          >
-            <span className="text-sm font-medium" style={{ writingMode: 'vertical-rl' }}>
-              세션
-            </span>
-          </button>
-        </div>
-      </aside>
-    )
-  }
+  const isDarkMode = theme === 'dark'
 
   return (
-    <aside className="w-full min-w-0 min-h-0 h-full border-r border-gray-200 dark:border-white/10 bg-white dark:bg-[#141414] flex flex-col shrink-0 overflow-hidden">
-      <div className="h-8 flex items-center justify-between gap-2 pl-4 pr-0 border-b border-gray-200 dark:border-white/10 shrink-0">
-        <h1 className="text-lg font-bold text-gray-800 dark:text-gray-200 truncate min-w-0 flex-1">
-          Coworker
-        </h1>
-        <div className="flex items-center gap-1 shrink-0">
-          <button
-            type="button"
+    <div className="w-full h-full flex flex-col">
+      {/* Sidebar Header */}
+      <div className="flex items-center justify-between p-4 border-b border-transparent">
+        <div className="flex items-center gap-2">
+          <h1 className="text-xl font-bold tracking-tight">Coworker</h1>
+        </div>
+        <div className="flex items-center gap-2">
+          <button 
             onClick={onThemeToggle}
-            className="h-6 w-6 flex items-center justify-center rounded hover:bg-gray-100 dark:hover:bg-white/5 transition-colors text-gray-600 dark:text-gray-400"
+            className={`p-2 rounded-full transition-colors ${isDarkMode ? 'hover:bg-zinc-800 text-yellow-500' : 'hover:bg-zinc-100 text-yellow-600'}`}
             title={theme === 'light' ? '다크 모드로 전환' : '라이트 모드로 전환'}
-            aria-label={theme === 'light' ? '다크 모드로 전환' : '라이트 모드로 전환'}
           >
-            {theme === 'light' ? (
-              <span className="text-sm leading-none inline-flex items-center" aria-hidden>🌙</span>
-            ) : (
-              <span className="text-sm leading-none inline-flex items-center" aria-hidden>☀️</span>
-            )}
+            {isDarkMode ? <Sun size={18} /> : <Moon size={18} />}
           </button>
-          <button
-            type="button"
-            onClick={onCollapse}
-            className="h-6 w-6 flex items-center justify-center rounded hover:bg-gray-100 dark:hover:bg-white/5 transition-colors text-gray-600 dark:text-gray-400"
-            title="세션 목록 접기"
-            aria-label="세션 목록 접기"
-          >
-            <span className="text-sm leading-none inline-flex items-center" aria-hidden>»</span>
-          </button>
+          {onCloseMobile && (
+            <button 
+              onClick={onCloseMobile}
+              className="lg:hidden p-2 rounded-full hover:bg-zinc-800 text-zinc-400"
+              title="사이드바 닫기"
+            >
+              <X size={20} />
+            </button>
+          )}
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-2">
-        {sessions.length === 0 ? (
-          <p className="text-sm text-gray-500 dark:text-gray-500 px-3 py-4 text-center">
-            세션이 없습니다
-          </p>
-        ) : (
-          sessions.map((sess) => (
-            <div
-              key={sess.id}
-              className={`flex items-center gap-1 rounded-sm mb-0 border border-transparent ${
-                sess.id === currentSessionId
-                  ? 'bg-emerald-50 dark:bg-white/5 border-l-2 border-l-emerald-500 rounded-none'
-                  : 'hover:bg-gray-100 dark:hover:bg-white/5'
-              }`}
+      {/* History List */}
+      <div className="flex-1 overflow-y-auto p-2 space-y-1 scrollbar-hide">
+        {sessions.map((chat) => {
+          const isActive = chat.id === currentSessionId
+          return (
+            <div 
+              key={chat.id}
+              onClick={() => onSwitch(chat.id)}
+              className={`group flex items-center justify-between p-3 rounded-xl cursor-pointer transition-all
+                ${isActive && isDarkMode ? 'bg-emerald-900/20 border border-emerald-500/30' : ''}
+                ${isActive && !isDarkMode ? 'bg-emerald-50 border border-emerald-200' : ''}
+                ${!isActive && isDarkMode ? 'hover:bg-zinc-800/50 border border-transparent' : ''}
+                ${!isActive && !isDarkMode ? 'hover:bg-zinc-100 border border-transparent' : ''}
+              `}
             >
-              <button
-                type="button"
-                onClick={() => onSwitch(sess.id)}
-                className={`flex-1 min-w-0 text-left px-2 py-1.5 transition-colors rounded-l-lg ${
-                  sess.id === currentSessionId
-                    ? 'text-emerald-600 dark:text-emerald-500'
-                    : 'text-gray-700 dark:text-gray-300'
-                }`}
-              >
-                <span
-                  className={`block truncate text-sm font-medium ${
-                    sess.id === currentSessionId
-                      ? 'text-emerald-600 dark:text-emerald-500'
-                      : 'text-gray-800 dark:text-gray-300'
-                  }`}
-                >
-                  {sess.title ?? '새 대화'}
-                </span>
-                <span className="block text-xs text-gray-500 dark:text-gray-500 mt-0.5">
-                  {formatDate(sess.updated_at)}
-                </span>
-              </button>
-              <button
-                type="button"
+              <div className="flex-1 min-w-0 pr-2">
+                <p className={`text-sm font-medium truncate ${isActive ? 'text-emerald-500' : isDarkMode ? 'text-zinc-300 group-hover:text-white' : 'text-zinc-700 group-hover:text-black'}`}>
+                  {chat.title || '새 대화'}
+                </p>
+                <p className={`text-xs mt-1 ${isDarkMode ? 'text-zinc-500' : 'text-zinc-400'}`}>
+                  {formatDate(chat.updated_at)}
+                </p>
+              </div>
+              <button 
                 onClick={(e) => {
                   e.stopPropagation()
-                  onDeleteSession(sess.id)
+                  onDeleteSession(chat.id)
                 }}
-                className="h-6 w-6 flex items-center justify-center rounded hover:bg-red-100 dark:hover:bg-red-900/30 text-gray-400 hover:text-red-600 dark:hover:text-red-400 shrink-0 mr-1 transition-colors"
-                title="세션 삭제"
-                aria-label="세션 삭제"
-              >
-                <span className="text-xs leading-none" aria-hidden>🗑</span>
+                className={`opacity-0 group-hover:opacity-100 p-1.5 rounded-md transition-all
+                ${isDarkMode ? 'hover:bg-zinc-700 text-zinc-500 hover:text-red-400' : 'hover:bg-zinc-200 text-zinc-400 hover:text-red-500'}
+              `}>
+                <Trash2 size={16} />
               </button>
             </div>
-          ))
-        )}
+          )
+        })}
       </div>
 
-      <div className="h-10 flex items-center px-3 py-1.5 border-t border-gray-200 dark:border-white/10 shrink-0">
-        <button
+      {/* New Session Button */}
+      <div className="p-4 mt-auto">
+        <button 
           onClick={onCreate}
-          className="w-full py-1.5 px-2 bg-emerald-600 dark:bg-emerald-600 text-white rounded-sm text-xs font-mono font-medium hover:bg-emerald-700 dark:hover:bg-emerald-700 transition-colors"
+          className="w-full h-10 flex items-center justify-center gap-2 rounded-xl font-semibold transition-all active:scale-[0.98] bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
         >
-          + 새 세션
+          <Plus size={18} />
+          새 세션
         </button>
       </div>
-    </aside>
+    </div>
   )
 }

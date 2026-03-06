@@ -9,23 +9,23 @@ interface StatusConfig {
 }
 
 const STATUS_CONFIG: Record<RunStatusType, StatusConfig> = {
-  queued: { label: '대기 중', color: 'bg-gray-100 text-gray-600', dot: 'bg-gray-400' },
-  thinking: { label: '분석 중...', color: 'bg-blue-100 text-blue-700', dot: 'bg-blue-500' },
-  solo: { label: 'Solo 응답 중...', color: 'bg-indigo-100 text-indigo-700', dot: 'bg-indigo-500' },
+  queued: { label: '대기 중', color: 'border-gray-500/30 bg-gray-500/10 text-gray-500 dark:border-gray-500/30 dark:bg-gray-500/10 dark:text-gray-400', dot: 'bg-gray-500' },
+  thinking: { label: '분석 중...', color: 'border-blue-500/30 bg-blue-500/10 text-blue-600 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-400', dot: 'bg-blue-500' },
+  solo: { label: 'Solo 응답 중...', color: 'border-indigo-500/30 bg-indigo-500/10 text-indigo-600 dark:border-indigo-500/30 dark:bg-indigo-500/10 dark:text-indigo-400', dot: 'bg-indigo-500' },
   delegating: {
     label: '팀 구성 중...',
-    color: 'bg-yellow-100 text-yellow-700',
+    color: 'border-yellow-500/30 bg-yellow-500/10 text-yellow-600 dark:border-yellow-500/30 dark:bg-yellow-500/10 dark:text-yellow-400',
     dot: 'bg-yellow-500',
   },
-  working: { label: '작업 중...', color: 'bg-orange-100 text-orange-700', dot: 'bg-orange-500' },
+  working: { label: '작업 중...', color: 'border-orange-500/30 bg-orange-500/10 text-orange-600 dark:border-orange-500/30 dark:bg-orange-500/10 dark:text-orange-400', dot: 'bg-orange-500' },
   integrating: {
     label: '통합 중...',
-    color: 'bg-purple-100 text-purple-700',
+    color: 'border-purple-500/30 bg-purple-500/10 text-purple-600 dark:border-purple-500/30 dark:bg-purple-500/10 dark:text-purple-400',
     dot: 'bg-purple-500',
   },
-  done: { label: '완료', color: 'bg-green-100 text-green-700', dot: 'bg-green-500' },
-  error: { label: '오류', color: 'bg-red-100 text-red-700', dot: 'bg-red-500' },
-  cancelled: { label: '취소됨', color: 'bg-gray-100 text-gray-500', dot: 'bg-gray-400' },
+  done: { label: '완료', color: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-400', dot: 'bg-emerald-500' },
+  error: { label: '오류', color: 'border-red-500/30 bg-red-500/10 text-red-600 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-400', dot: 'bg-red-500' },
+  cancelled: { label: '취소됨', color: 'border-zinc-500/30 bg-zinc-500/10 text-zinc-500 dark:border-zinc-500/30 dark:bg-zinc-500/10 dark:text-zinc-400', dot: 'bg-zinc-500' },
 }
 
 const ANIMATED_STATES: RunStatusType[] = ['thinking', 'solo', 'delegating', 'working', 'integrating']
@@ -70,18 +70,14 @@ export default function StatusBadge({ status, progress, model, timing }: Props) 
   const elapsedSec = startDate && now ? (now - startDate.getTime()) / 1000 : null
 
   return (
-    <span
-      className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium ${config.color}`}
-    >
-      <span
-        className={`w-1.5 h-1.5 rounded-full ${config.dot} ${isAnimated ? 'animate-pulse' : ''}`}
-      />
+    <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-full border ${config.color} text-sm font-medium shadow-sm`}>
+      <span className={`w-2 h-2 rounded-full ${config.dot} ${isAnimated ? 'animate-pulse' : ''}`} />
       {config.label}
       {progress && ` (${progress})`}
       {elapsedSec !== null && (
-        <span className="opacity-70">{elapsedSec.toFixed(1)}s</span>
+        <span className="opacity-70 ml-1 text-xs">{elapsedSec.toFixed(1)}s</span>
       )}
-      {modelLabel && <span className="opacity-60">· {modelLabel}</span>}
-    </span>
+      {modelLabel && <span className="opacity-70 text-xs ml-1 font-mono">{modelLabel}</span>}
+    </div>
   )
 }

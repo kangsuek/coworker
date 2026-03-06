@@ -32,14 +32,12 @@ export default function AgentStatusBar({ messages, isActive }: Props) {
   const done = messages.filter((m) => m.status === 'done').length
 
   return (
-    <div className="px-4 py-2 border-t border-gray-200 bg-gray-50 text-xs text-gray-500 flex items-center gap-2 shrink-0">
-      <span>{total}개 Agent</span>
-      <span className="text-gray-300">·</span>
-      <span>
-        {done}/{total} 완료
-      </span>
-      <span className="text-gray-300">·</span>
-      <span>소요 시간: {formatElapsed(elapsed)}</span>
+    <div className="p-3 text-xs flex items-center justify-between border-t border-zinc-200 dark:border-zinc-800/80 bg-zinc-100 dark:bg-zinc-950 text-zinc-600 dark:text-zinc-400 shrink-0">
+      <div className="font-medium">{total}개 Agent</div>
+      <div className="flex items-center gap-4">
+        <span>{done}/{total} 완료</span>
+        <span>소요 시간: <span className="text-zinc-800 dark:text-zinc-300">{formatElapsed(elapsed)}</span></span>
+      </div>
     </div>
   )
 }

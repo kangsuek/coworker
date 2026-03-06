@@ -1,25 +1,22 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
+import { Menu, ChevronDown, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 
 import AgentChannel from './components/AgentChannel'
 import ErrorBoundary from './components/ErrorBoundary'
 import SessionList from './components/SessionList'
-import Splitbar from './components/Splitbar'
 import UserChannel from './components/UserChannel'
 import { useAgentPolling } from './hooks/useAgentPolling'
 import { useSession } from './hooks/useSession'
 
-const LAYOUT_KEY = 'coworker_layout'
 const THEME_KEY = 'coworker_theme'
 
 const CLAUDE_MODELS = [
-  { value: '', label: '기본값' },
   { value: 'sonnet', label: 'Sonnet' },
   { value: 'haiku', label: 'Haiku' },
   { value: 'opus', label: 'Opus' },
 ]
 
 const GEMINI_MODELS = [
-  { value: '', label: '기본값' },
   { value: 'gemini-3-pro-preview', label: 'Gemini3 pro' },
   { value: 'gemini-3-flash-preview', label: 'Gemini3 flash' },
   { value: 'gemini-2.5-pro', label: 'Gemini2.5 Pro' },
@@ -34,35 +31,6 @@ function getModelOptions(provider: string, currentValue: string): { value: strin
   return [{ value: currentValue, label: currentValue }, ...options]
 }
 
-const MIN_SIDEBAR = 180
-const MAX_SIDEBAR = 480
-const DEFAULT_SIDEBAR = 256
-const SIDEBAR_RAIL = 35
-const MIN_AGENT = 320
-const MAX_AGENT = 640
-const DEFAULT_AGENT = 420
-const AGENT_RAIL = 35
-
-function loadLayout(): { sidebar: number; agent: number } {
-  try {
-    const raw = localStorage.getItem(LAYOUT_KEY)
-    if (raw) {
-      const parsed = JSON.parse(raw) as { sidebar?: number; agent?: number }
-      return {
-        sidebar: clamp(parsed.sidebar ?? DEFAULT_SIDEBAR, MIN_SIDEBAR, MAX_SIDEBAR),
-        agent: clamp(parsed.agent ?? DEFAULT_AGENT, MIN_AGENT, MAX_AGENT),
-      }
-    }
-  } catch {
-    /* ignore */
-  }
-  return { sidebar: DEFAULT_SIDEBAR, agent: DEFAULT_AGENT }
-}
-
-function clamp(v: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, v))
-}
-
 function loadTheme(): 'light' | 'dark' {
   try {
     const t = localStorage.getItem(THEME_KEY)
@@ -70,32 +38,27 @@ function loadTheme(): 'light' | 'dark' {
   } catch {
     /* ignore */
   }
-  return 'light'
+  return 'dark' // default to dark according to design
 }
 
 function App() {
-  const [layout, setLayout] = useState(loadLayout)
   const [theme, setTheme] = useState<'light' | 'dark'>(loadTheme)
-  const [sidebarOpen, setSidebarOpen] = useState(true)
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
-  const [agentCollapsed, setAgentCollapsed] = useState(false)
+  const [isSidebarOpen, setIsSidebarOpen] = useState(typeof window !== 'undefined' ? window.innerWidth >= 1024 : true)
+  const [isAgentPanelOpen, setIsAgentPanelOpen] = useState(true)
+  
   const [currentMode, setCurrentMode] = useState<'solo' | 'team' | null>(null)
   const [currentRunId, setCurrentRunId] = useState<string | null>(null)
   const session = useSession()
 
   const [llmProvider, setLlmProvider] = useState('claude-cli')
-  const [llmModel, setLlmModel] = useState('')
+  const [llmModel, setLlmModel] = useState('haiku')
   const [prevSessionId, setPrevSessionId] = useState<string | undefined>(undefined)
 
   if (session.currentSession?.id !== prevSessionId) {
     setPrevSessionId(session.currentSession?.id)
     setLlmProvider(session.currentSession?.llm_provider || 'claude-cli')
-    setLlmModel(session.currentSession?.llm_model || '')
+    setLlmModel(session.currentSession?.llm_model || (session.currentSession?.llm_provider === 'gemini-cli' ? 'gemini-3-flash-preview' : 'haiku'))
   }
-
-  useEffect(() => {
-    localStorage.setItem(LAYOUT_KEY, JSON.stringify({ sidebar: layout.sidebar, agent: layout.agent }))
-  }, [layout.sidebar, layout.agent])
 
   useEffect(() => {
     if (theme === 'dark') {
@@ -110,30 +73,6 @@ function App() {
     setTheme((prev) => (prev === 'light' ? 'dark' : 'light'))
   }, [])
 
-  const resizeSidebar = useCallback((deltaX: number) => {
-    if (sidebarCollapsed) {
-      if (deltaX > 0) setSidebarCollapsed(false)
-      return
-    }
-    setLayout((prev) => {
-      const next = clamp(prev.sidebar + deltaX, MIN_SIDEBAR, MAX_SIDEBAR)
-      return { ...prev, sidebar: next }
-    })
-    if (deltaX < 0 && layout.sidebar + deltaX < MIN_SIDEBAR) setSidebarCollapsed(true)
-  }, [sidebarCollapsed, layout.sidebar])
-  const resizeAgent = useCallback((deltaX: number) => {
-    if (agentCollapsed) {
-      if (deltaX < 0) setAgentCollapsed(false)
-      return
-    }
-    setLayout((prev) => {
-      const next = clamp(prev.agent - deltaX, MIN_AGENT, MAX_AGENT)
-      return { ...prev, agent: next }
-    })
-    if (deltaX > 0 && layout.agent - deltaX < MIN_AGENT) setAgentCollapsed(true)
-  }, [agentCollapsed, layout.agent])
-
-  // useAgentPolling을 App 레벨에서 실행: 취소 메시지 생성에 활용
   const { messages: agentMessages, isPolling: isAgentPolling } = useAgentPolling(
     currentRunId,
     currentMode,
@@ -163,112 +102,136 @@ function App() {
     session.deleteSession(id)
   }
 
+  const isDarkMode = theme === 'dark'
+
   return (
-    <div className="flex h-screen bg-gray-50 text-gray-900 dark:bg-[#0D0D0D] dark:text-gray-300 overflow-hidden font-sans">
-      {sidebarOpen && (
-        <>
-          <div
-            className="flex flex-col shrink-0 min-h-0 h-full transition-[width] duration-200 ease-out"
-            style={{ width: sidebarCollapsed ? SIDEBAR_RAIL : layout.sidebar }}
-          >
-            <SessionList
-              sessions={session.sessions}
-              currentSessionId={session.currentSession?.id ?? null}
-              onSwitch={handleSwitchSession}
-              onCreate={handleCreateSession}
-              onDeleteSession={handleDeleteSession}
-              theme={theme}
-              onThemeToggle={toggleTheme}
-              collapsed={sidebarCollapsed}
-              onCollapse={() => setSidebarCollapsed(true)}
-              onExpand={() => setSidebarCollapsed(false)}
-            />
-          </div>
-          <Splitbar onResize={resizeSidebar} />
-        </>
+    <div className={`flex h-screen w-full overflow-hidden transition-colors duration-300 ${isDarkMode ? 'bg-zinc-950 text-zinc-100' : 'bg-zinc-50 text-zinc-900'} font-sans`}>
+      
+      {/* Left Sidebar */}
+      <div className={`
+        fixed inset-y-0 left-0 z-40 transform transition-all duration-300 ease-in-out overflow-hidden
+        lg:relative lg:translate-x-0 shrink-0
+        ${isSidebarOpen ? 'w-72 translate-x-0' : 'w-72 -translate-x-full lg:w-0 lg:border-none'}
+        ${isDarkMode ? 'bg-zinc-900 border-zinc-800' : 'bg-white border-zinc-200'}
+        border-r
+      `}>
+        <SessionList
+          sessions={session.sessions}
+          currentSessionId={session.currentSession?.id ?? null}
+          onSwitch={handleSwitchSession}
+          onCreate={handleCreateSession}
+          onDeleteSession={handleDeleteSession}
+          theme={theme}
+          onThemeToggle={toggleTheme}
+          onCloseMobile={() => setIsSidebarOpen(false)}
+        />
+      </div>
+
+      {/* Mobile background overlay */}
+      {isSidebarOpen && (
+        <div 
+          className="fixed inset-0 bg-black/50 z-30 lg:hidden backdrop-blur-sm transition-opacity"
+          onClick={() => setIsSidebarOpen(false)}
+        />
       )}
 
-      <div className="flex-1 flex min-w-0 min-h-0 overflow-hidden">
-        {/* User Channel */}
-        <div className="flex-1 flex flex-col min-h-0 border-r border-gray-200 dark:border-white/10 min-w-[200px] overflow-hidden">
-          <header className="h-8 px-4 border-b border-gray-200 dark:border-white/10 bg-white dark:bg-[#141414] flex items-center justify-between shrink-0">
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => setSidebarOpen(!sidebarOpen)}
-                className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-gray-600 dark:text-gray-300"
-                title={sidebarOpen ? '사이드바 닫기' : '사이드바 열기'}
-              >
-                ☰
-              </button>
-              <span className="font-medium truncate text-gray-800 dark:text-gray-200">
-                {session.currentSession?.title ?? '새 대화'}
-              </span>
-            </div>
-            
-            <div className="flex items-center gap-2 text-xs">
+      {/* Main Chat Area */}
+      <div className={`flex-1 flex flex-col relative min-w-0 ${isDarkMode ? 'bg-zinc-950' : 'bg-zinc-50'}`}>
+        {/* Main Header */}
+        <header className={`flex items-center justify-between p-3 border-b shrink-0 ${isDarkMode ? 'border-zinc-800/80 bg-zinc-950' : 'border-zinc-200 bg-white'}`}>
+          <div className="flex items-center gap-3">
+            <button 
+              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+              className={`p-2 -ml-1 rounded-lg transition-colors ${isDarkMode ? 'hover:bg-zinc-800 text-zinc-400' : 'hover:bg-zinc-100 text-zinc-600'}`}
+            >
+              <Menu size={20} />
+            </button>
+            <h2 className="text-sm font-semibold truncate max-w-[200px] sm:max-w-xs">
+              {session.currentSession?.title ?? '새 대화'}
+            </h2>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {/* Model Selectors */}
+            <div className={`hidden sm:flex relative items-center rounded-md border text-xs transition-colors min-w-[5rem] overflow-visible
+              ${isDarkMode ? 'border-zinc-800 bg-zinc-900/50' : 'border-zinc-200 bg-white'}
+            `}>
+              <ChevronDown size={12} className={`absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none z-0 ${isDarkMode ? 'text-zinc-500' : 'text-zinc-400'}`} aria-hidden />
               <select 
-                value={llmProvider} 
+                value={llmProvider}
                 onChange={(e) => {
-                  setLlmProvider(e.target.value)
-                  setLlmModel('') // Provide 변경 시 모델 초기화
+                  const provider = e.target.value
+                  setLlmProvider(provider)
+                  setLlmModel(provider === 'gemini-cli' ? 'gemini-3-flash-preview' : 'haiku')
                 }}
-                className="bg-gray-100 border border-gray-300 text-gray-800 dark:bg-[#242424] dark:border-white/10 dark:text-gray-200 rounded px-2 py-0.5 focus:outline-none"
+                className={`relative z-10 appearance-none bg-transparent pl-3 pr-7 py-1.5 font-medium outline-none cursor-pointer w-full min-w-0 ${isDarkMode ? 'text-zinc-300' : 'text-zinc-700'}`}
               >
                 <option value="claude-cli">Claude CLI</option>
                 <option value="gemini-cli">Gemini CLI</option>
-                {/* 추후 다른 모델 지원 시 옵션 추가 가능 */}
               </select>
-              <select
+            </div>
+
+            <div className={`hidden sm:flex relative items-center rounded-md border text-xs transition-colors min-w-[5rem] overflow-visible
+              ${isDarkMode ? 'border-zinc-800 bg-zinc-900/50' : 'border-zinc-200 bg-white'}
+            `}>
+              <ChevronDown size={12} className={`absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none z-0 ${isDarkMode ? 'text-zinc-500' : 'text-zinc-400'}`} aria-hidden />
+              <select 
                 value={llmModel}
                 onChange={(e) => setLlmModel(e.target.value)}
-                title="모델 선택"
-                className="bg-gray-100 border border-gray-300 text-gray-800 dark:bg-[#242424] dark:border-white/10 dark:text-gray-200 rounded px-2 py-0.5 min-w-[140px] focus:outline-none"
+                className={`relative z-10 appearance-none bg-transparent pl-3 pr-7 py-1.5 font-medium outline-none cursor-pointer w-full min-w-0 ${isDarkMode ? 'text-zinc-300' : 'text-zinc-700'}`}
               >
                 {getModelOptions(llmProvider, llmModel).map((opt) => (
                   <option key={opt.value || '__default__'} value={opt.value}>
-                    {opt.label}
+                    {opt.label || opt.value}
                   </option>
                 ))}
               </select>
             </div>
-          </header>
+            
+            <button
+              onClick={() => setIsAgentPanelOpen(!isAgentPanelOpen)}
+              className={`p-1.5 rounded-lg transition-colors ml-1 ${isDarkMode ? 'hover:bg-zinc-800 text-zinc-400' : 'hover:bg-zinc-100 text-zinc-600'}`}
+              title={isAgentPanelOpen ? "Agent Channel 숨기기" : "Agent Channel 보기"}
+            >
+              {isAgentPanelOpen ? <PanelLeftClose size={18} /> : <PanelLeftOpen size={18} />}
+            </button>
+          </div>
+        </header>
 
-          <UserChannel
-            key={session.currentSession?.id ?? 'new'}
-            currentSession={session.currentSession}
-            messages={session.messages}
-            runId={currentRunId}
-            llmProvider={llmProvider}
-            llmModel={llmModel}
-            onMessageAdded={session.addMessage}
-            onSessionCreated={handleSessionCreated}
-            onModeChange={setCurrentMode}
-            onRunChange={setCurrentRunId}
-            agentMessages={agentMessages}
-          />
-        </div>
-
-        <Splitbar onResize={resizeAgent} />
-
-        {/* Agent Channel */}
-        <div
-          className="flex flex-col shrink-0 min-h-0 h-full overflow-hidden transition-[width] duration-200 ease-out"
-          style={{ width: agentCollapsed ? AGENT_RAIL : layout.agent }}
-        >
-          <ErrorBoundary fallbackLabel="Agent Channel">
-            <AgentChannel
-              key={session.currentSession?.id ?? 'new'}
-              mode={currentMode}
-              messages={agentMessages}
-              isPolling={isAgentPolling}
-              isRunActive={currentRunId !== null}
-              collapsed={agentCollapsed}
-              onCollapse={() => setAgentCollapsed(true)}
-              onExpand={() => setAgentCollapsed(false)}
-            />
-          </ErrorBoundary>
-        </div>
+        <UserChannel
+          key={session.currentSession?.id ?? 'new'}
+          currentSession={session.currentSession}
+          messages={session.messages}
+          runId={currentRunId}
+          llmProvider={llmProvider}
+          llmModel={llmModel}
+          onMessageAdded={session.addMessage}
+          onSessionCreated={handleSessionCreated}
+          onModeChange={setCurrentMode}
+          onRunChange={setCurrentRunId}
+          agentMessages={agentMessages}
+        />
       </div>
+
+      {/* Right Panel (Agent Channel) */}
+      <div className={`
+        fixed inset-y-0 right-0 z-40 w-full md:w-[400px] transform transition-transform duration-300 ease-in-out flex flex-col shrink-0
+        lg:relative lg:translate-x-0 lg:w-[480px]
+        ${isAgentPanelOpen ? 'translate-x-0' : 'translate-x-full lg:hidden lg:w-0 lg:border-none'}
+        ${isDarkMode ? 'bg-zinc-950 border-zinc-800' : 'bg-zinc-50 border-zinc-200'}
+        border-l shadow-2xl lg:shadow-none
+      `}>
+        <ErrorBoundary fallbackLabel="Agent Channel">
+          <AgentChannel
+            mode={currentMode}
+            messages={agentMessages}
+            isPolling={isAgentPolling}
+            isRunActive={currentRunId !== null}
+            onCloseMobile={() => setIsAgentPanelOpen(false)}
+          />
+        </ErrorBoundary>
+      </div>
+
     </div>
   )
 }

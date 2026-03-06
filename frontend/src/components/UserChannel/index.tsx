@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { Plus, X } from 'lucide-react'
 
 import { useRunPolling } from '../../hooks/useRunPolling'
 import { api } from '../../lib/api'
@@ -34,6 +35,7 @@ export default function UserChannel({
   const [input, setInput] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const onMessageAddedRef = useRef(onMessageAdded)
   const onModeChangeRef = useRef(onModeChange)
   const onRunChangeRef = useRef(onRunChange)
@@ -152,54 +154,85 @@ export default function UserChannel({
 
   return (
     <>
-      <div className="flex-1 min-h-0 overflow-y-auto p-4">
-        {messages.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full text-gray-500 dark:text-gray-500">
-            <p className="text-sm font-mono text-emerald-600 dark:text-emerald-500 mb-1">&gt; 무엇이든 물어보세요</p>
-            <p className="text-xs font-mono text-gray-400">복잡한 작업은 Team 모드로 진행할 수 있습니다.</p>
-          </div>
-        ) : (
-          messages.map((msg) => <MessageBubble key={msg.id} message={msg} />)
-        )}
+      <div className="flex-1 overflow-y-auto flex flex-col p-4 sm:p-6 lg:px-12 scrollbar-hide">
+        <div className="max-w-3xl w-full mx-auto space-y-6">
+          {messages.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-[50vh] text-zinc-500 dark:text-zinc-400">
+              <p className="text-sm font-mono text-emerald-600 dark:text-emerald-500 mb-2">&gt; 무엇이든 물어보세요</p>
+              <p className="text-xs font-mono opacity-70">복잡한 작업은 Team 모드로 진행할 수 있습니다.</p>
+            </div>
+          ) : (
+            messages.map((msg) => <MessageBubble key={msg.id} message={msg} />)
+          )}
 
-        {runId && (
-          <div className="flex justify-start mb-4">
-            <StatusBadge status={runStatus.status} progress={runStatus.progress} model={runStatus.model} timing={runStatus.timing} />
-          </div>
-        )}
+          {runId && (
+            <div className="flex justify-start mt-2">
+              <StatusBadge status={runStatus.status} progress={runStatus.progress} model={runStatus.model} timing={runStatus.timing} />
+            </div>
+          )}
 
-        <div ref={messagesEndRef} />
+          <div ref={messagesEndRef} className="h-4"></div>
+        </div>
       </div>
 
-      <div className="h-10 flex items-center px-3 py-1.5 border-t border-gray-200 dark:border-white/10 bg-white dark:bg-[#141414] shrink-0">
-        <div className="flex gap-1.5 w-full items-center">
+      <div className="p-4 w-full border-t border-zinc-200 dark:border-zinc-800/80 bg-white dark:bg-zinc-950 shrink-0">
+        <div className="max-w-4xl mx-auto flex gap-2 items-center h-10">
           <input
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault()
-                handleSend()
+            ref={fileInputRef}
+            type="file"
+            multiple
+            className="hidden"
+            accept="*/*"
+            onChange={(e) => {
+              const files = e.target.files
+              if (files?.length) {
+                // TODO: 파일 첨부 처리 (미리보기/업로드 연동)
+                e.target.value = ''
               }
             }}
-            placeholder="메시지를 입력하세요..."
-            className="flex-1 min-h-0 px-3 py-1 border border-gray-300 dark:border-white/10 rounded-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent text-sm text-gray-900 dark:text-gray-200 bg-white dark:bg-[#0D0D0D] placeholder-gray-400 dark:placeholder-gray-400 disabled:bg-gray-100 dark:disabled:bg-gray-600"
-            disabled={isRunning}
           />
-          {/* 6-5: 실행 중이면 취소 버튼, 아니면 전송 버튼 */}
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isRunning}
+            className="shrink-0 h-10 w-10 flex items-center justify-center rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            title="파일 첨부"
+          >
+            <Plus size={20} strokeWidth={2} />
+          </button>
+          <div className="flex-1 relative flex items-center h-10 min-h-10 p-1 rounded-xl border transition-all shadow-sm bg-zinc-50 dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 focus-within:border-zinc-300 dark:focus-within:border-zinc-700">
+            <textarea
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault()
+                  handleSend()
+                }
+              }}
+              placeholder="메시지를 입력하세요..."
+              className="w-full h-full min-h-0 py-1.5 px-2 bg-transparent resize-none outline-none text-sm leading-tight max-h-32 overflow-y-auto scrollbar-hide text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-600"
+              rows={1}
+              disabled={isRunning}
+            />
+          </div>
+          
           {isRunning ? (
-            <button
+            <button 
               onClick={handleCancel}
-              className="px-3 py-1 bg-red-500 text-white rounded-sm hover:bg-red-600 dark:hover:bg-red-600 transition-colors text-sm font-medium"
+              className="h-10 px-4 rounded-xl shrink-0 transition-all bg-red-500/10 hover:bg-red-500/20 text-red-500 border border-red-500/20 font-medium text-sm flex items-center gap-1.5"
             >
-              취소 ✕
+              취소 <X size={16} strokeWidth={2.5} />
             </button>
           ) : (
-            <button
+            <button 
               onClick={handleSend}
               disabled={!input.trim()}
-              className="px-3 py-1 bg-emerald-600 dark:bg-emerald-600 text-white rounded-sm hover:bg-emerald-700 dark:hover:bg-emerald-700 transition-colors disabled:opacity-50 text-sm font-medium"
+              className={`h-10 px-4 rounded-xl shrink-0 transition-all font-medium text-sm flex items-center
+                ${input.trim() 
+                  ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-md' 
+                  : 'bg-zinc-200 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-600'}
+              `}
             >
               전송
             </button>
