@@ -17,6 +17,7 @@ class ClaudeCliProvider(LLMProvider):
         **kwargs,
     ) -> str:
         """Claude CLI를 통해 모델을 호출합니다."""
+        run_id = kwargs.get("run_id")
         return await execute_with_lock(
             call_claude_streaming(
                 system_prompt=system_prompt,
@@ -24,5 +25,6 @@ class ClaudeCliProvider(LLMProvider):
                 on_line=on_line,
                 model=model,
                 **kwargs
-            )
+            ),
+            run_id=run_id,
         )

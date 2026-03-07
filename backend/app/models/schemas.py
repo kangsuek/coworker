@@ -16,6 +16,10 @@ def _ensure_utc(dt: datetime) -> datetime:
 
 UTCDatetime = Annotated[datetime, BeforeValidator(_ensure_utc)]
 
+# --- Run 상태 상수 ---
+ACTIVE_RUN_STATUSES: frozenset[str] = frozenset({"queued", "thinking", "solo", "delegating", "working", "integrating"})
+CANCELLABLE_STATUSES: frozenset[str] = ACTIVE_RUN_STATUSES  # 현재 동일 — 취소 가능 = 활성 상태
+
 # --- 요청 모델 ---
 
 

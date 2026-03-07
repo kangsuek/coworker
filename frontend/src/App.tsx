@@ -50,7 +50,6 @@ function App() {
   
   const [currentMode, setCurrentMode] = useState<'solo' | 'team' | null>(null)
   const [currentRunId, setCurrentRunId] = useState<string | null>(null)
-  const [_historicalRunId, setHistoricalRunId] = useState<string | null>(null)
   const [historicalAgentMessages, setHistoricalAgentMessages] = useState<AgentMessage[]>([])
   const session = useSession()
 
@@ -85,7 +84,6 @@ function App() {
     onDone: (response, mode, model, timing) => {
       if (mode === 'team' && currentRunId) {
         const runId = currentRunId
-        setHistoricalRunId(runId)
         api.getAgentMessages(runId)
           .then(({ messages }) => setHistoricalAgentMessages(messages))
           .catch(() => {})
@@ -117,7 +115,6 @@ function App() {
       if (currentMode === 'team' && agentMessages.length > 0) {
         if (currentRunId) {
           const runId = currentRunId
-          setHistoricalRunId(runId)
           api.getAgentMessages(runId)
             .then(({ messages }) => setHistoricalAgentMessages(messages))
             .catch(() => {})
@@ -142,7 +139,6 @@ function App() {
   const handleSwitchSession = async (id: string) => {
     setCurrentRunId(null)
     setCurrentMode(null)
-    setHistoricalRunId(null)
     setHistoricalAgentMessages([])
     const detail = await session.switchSession(id)
     // 마지막 팀 모드 실행의 에이전트 메시지 복원
@@ -150,7 +146,6 @@ function App() {
       (m) => m.role === 'reader' && m.mode === 'team' && m.run_id,
     )
     if (lastTeamMsg?.run_id) {
-      setHistoricalRunId(lastTeamMsg.run_id)
       api.getAgentMessages(lastTeamMsg.run_id)
         .then(({ messages }) => setHistoricalAgentMessages(messages))
         .catch(() => {})
@@ -160,7 +155,6 @@ function App() {
   const handleCreateSession = () => {
     setCurrentRunId(null)
     setCurrentMode(null)
-    setHistoricalRunId(null)
     setHistoricalAgentMessages([])
     session.createSession()
   }
@@ -168,7 +162,6 @@ function App() {
   const handleDeleteSession = (id: string) => {
     setCurrentRunId(null)
     setCurrentMode(null)
-    setHistoricalRunId(null)
     setHistoricalAgentMessages([])
     session.deleteSession(id)
   }
@@ -289,7 +282,6 @@ function App() {
           onSessionCreated={handleSessionCreated}
           onModeChange={setCurrentMode}
           onRunChange={setCurrentRunId}
-          agentMessages={agentMessages}
         />
       </div>
 

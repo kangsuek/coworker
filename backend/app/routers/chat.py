@@ -8,6 +8,7 @@ from app.agents.reader import ReaderAgent
 from app.config import settings
 from app.models.db import Run, async_session, get_db
 from app.models.schemas import (
+    CANCELLABLE_STATUSES,
     AgentMessageOut,
     AgentMessagesResponse,
     ChatRequest,
@@ -28,8 +29,6 @@ from app.services.session_service import (
 from app.services.stream_service import stream_manager
 
 router = APIRouter(tags=["chat"])
-
-_CANCELLABLE_STATUSES = {"queued", "thinking", "solo", "delegating", "working", "integrating"}
 
 
 async def _run_reader_agent(session_id: str, user_message: str, run_id: str) -> None:
@@ -135,11 +134,11 @@ async def cancel_run(run_id: str, db: AsyncSession = Depends(get_db)):
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found")
 
-    if run.status in _CANCELLABLE_STATUSES:
+    if run.status in CANCELLABLE_STATUSES:
         await cancel_current(run_id=run_id)
         await update_run_status(db, run_id, "cancelled")
 
-    final_status = "cancelled" if run.status in _CANCELLABLE_STATUSES else run.status
+    final_status = "cancelled" if run.status in CANCELLABLE_STATUSES else run.status
     return {"run_id": run_id, "status": final_status}
 
 

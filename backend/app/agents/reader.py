@@ -292,8 +292,10 @@ class ReaderAgent:
         semaphore = asyncio.Semaphore(3)  # 동시 CLI 실행 제한 (Rate limit 대응)
         agent_results: dict[str, str] = {}  # 에이전트 이름 -> 결과물
         agent_tasks: dict[int, asyncio.Task] = {}  # index -> Task
+        started_count = 0   # 시작된 에이전트 수 (progress 표시용)
         completed_count = 0
         total_count = len(classification.agents)
+        progress_lock = asyncio.Lock()  # started_count / completed_count 보호
 
         async def run_one_agent(index: int, agent_plan: AgentPlan) -> str:
             # 1. 의존성 대기 (depends_on에 있는 이전 에이전트 태스크 완료 대기)
@@ -325,9 +327,11 @@ class ReaderAgent:
                         self.db, session_id, run_id, agent.name, agent.role_preset
                     )
 
-                # progress 업데이트
-                nonlocal completed_count
-                progress_str = f"{completed_count + 1}/{total_count}"
+                # progress 업데이트 (락으로 started_count 원자적 증가)
+                nonlocal started_count, completed_count
+                async with progress_lock:
+                    started_count += 1
+                    progress_str = f"{started_count}/{total_count}"
                 async with self.db_lock:
                     await update_run_status(self.db, run_id, "working", progress=progress_str)
 
@@ -377,7 +381,8 @@ class ReaderAgent:
                     await update_agent_message_status(self.db, agent_msg.id, "done")
                 
                 agent_results[agent.name] = result
-                completed_count += 1
+                async with progress_lock:
+                    completed_count += 1
                 return result
 
         # 3. 모든 에이전트 태스크 생성 및 실행

@@ -80,7 +80,10 @@ async def create_user_message(
     if role == "user":
         session = await db.get(models.Session, session_id)
         if session is not None and session.title is None:
-            session.title = content[:30] + ("…" if len(content) > 30 else "")
+            from app.config import settings
+            triggers = [t for t in [settings.team_trigger_header, settings.role_add_trigger] if t]
+            if not any(content.startswith(t) for t in triggers):
+                session.title = content[:30] + ("…" if len(content) > 30 else "")
 
     msg = models.UserMessage(
         session_id=session_id,
@@ -148,13 +151,30 @@ async def create_run(db: AsyncSession, session_id: str, user_message_id: str) ->
     return run
 
 
+_TERMINAL_STATUSES = {"done", "error", "cancelled"}
+
+
 async def update_run_status(
     db: AsyncSession, run_id: str, status: str, **fields
 ) -> models.Run | None:
     """Run 상태 및 필드 업데이트."""
     run = await db.get(models.Run, run_id)
     if run is None:
+        # TODO-06: 미존재 시에도 취소 목록 정리
+        try:
+            from app.services.cli_service import _cancelled_runs
+            _cancelled_runs.discard(run_id)
+        except Exception:
+            pass
         return None
+    # TODO-02: 이미 terminal 상태이면 업데이트 스킵 (race condition 방지)
+    if run.status in _TERMINAL_STATUSES:
+        try:
+            from app.services.cli_service import _cancelled_runs
+            _cancelled_runs.discard(run_id)
+        except Exception:
+            pass
+        return run
     run.status = status
     for key, value in fields.items():
         if hasattr(run, key):

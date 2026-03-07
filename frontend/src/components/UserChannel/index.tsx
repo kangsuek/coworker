@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Plus, X } from 'lucide-react'
 
 import { api } from '../../lib/api'
-import type { AgentMessage, RunStatus, Session, UserMessage } from '../../types/api'
+import type { RunStatus, Session, UserMessage } from '../../types/api'
 import MessageBubble from './MessageBubble'
 import StatusBadge from './StatusBadge'
 
@@ -17,7 +17,6 @@ interface Props {
   onSessionCreated: (sessionId: string) => void
   onModeChange: (mode: 'solo' | 'team' | null) => void
   onRunChange: (runId: string | null) => void
-  agentMessages?: AgentMessage[]
 }
 
 export default function UserChannel({
@@ -31,7 +30,6 @@ export default function UserChannel({
   onSessionCreated,
   onModeChange,
   onRunChange,
-  agentMessages: _agentMessages,
 }: Props) {
   const [input, setInput] = useState('')
   const [submitting, setSubmitting] = useState(false)

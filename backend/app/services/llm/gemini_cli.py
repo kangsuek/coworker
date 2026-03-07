@@ -9,7 +9,7 @@ from collections.abc import Callable
 
 from app.config import settings
 from .base import LLMProvider
-from app.services.cli_service import execute_with_lock, _cancelled_runs, _active_procs
+from app.services.cli_service import execute_with_lock, _cancelled_runs
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +23,7 @@ def _call_gemini_sync(
     import app.services.cli_service as cli_service
 
     run_id: str | None = kwargs.get("run_id")
+    proc_key = run_id or cli_service._UNTRACKED_KEY
     timeout: int = kwargs.get("timeout", settings.claude_cli_timeout)
     model: str = kwargs.get("model", "")
 
@@ -47,10 +48,11 @@ def _call_gemini_sync(
         text=True,
         start_new_session=True,
         bufsize=1,
+        cwd="/tmp",  # GEMINI.md 자동 로드 방지 (프로젝트 컨텍스트 오염 차단)
     )
 
-    # 활성 프로세스 추적
-    _active_procs.add(proc)
+    # 활성 프로세스 등록 (run_id 키로 분리)
+    cli_service._active_procs.setdefault(proc_key, []).append(proc)
 
     if run_id and run_id in cli_service._cancelled_runs:
         try:
@@ -58,8 +60,9 @@ def _call_gemini_sync(
         except (ProcessLookupError, OSError):
             pass
         proc.wait()
-        if proc in _active_procs:
-            _active_procs.remove(proc)
+        procs = cli_service._active_procs.get(proc_key, [])
+        if proc in procs:
+            procs.remove(proc)
         raise RuntimeError(f"Run {run_id} cancelled during startup")
 
     lines: list[str] = []
@@ -95,8 +98,11 @@ def _call_gemini_sync(
         proc.wait()
         raise
     finally:
-        if proc in _active_procs:
-            _active_procs.remove(proc)
+        procs = cli_service._active_procs.get(proc_key, [])
+        if proc in procs:
+            procs.remove(proc)
+        if not procs and proc_key in cli_service._active_procs:
+            del cli_service._active_procs[proc_key]
 
     if run_id and run_id in cli_service._cancelled_runs:
         raise RuntimeError(f"Run {run_id} was cancelled")

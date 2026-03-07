@@ -15,15 +15,18 @@ import os
 import signal
 import subprocess
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Coroutine
+from typing import Any
 
 from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-_active_procs: set[subprocess.Popen] = set()
+_active_procs: dict[str, list[subprocess.Popen]] = {}
 # 특정 run_id의 취소 상태를 추적
 _cancelled_runs: set[str] = set()
+
+_UNTRACKED_KEY = "__untracked__"
 
 
 def _call_claude_sync(
@@ -72,8 +75,9 @@ def _call_claude_sync(
         cwd="/tmp",  # CLAUDE.md 자동 로드 방지 (프로젝트 컨텍스트 오염 차단)
     )
 
-    # 활성 프로세스 집합에 추가
-    _active_procs.add(proc)
+    # 활성 프로세스 등록 (run_id 키로 분리)
+    proc_key = run_id or _UNTRACKED_KEY
+    _active_procs.setdefault(proc_key, []).append(proc)
 
     # Popen 직후 취소 여부 재확인 (Race condition 방어)
     if run_id and run_id in _cancelled_runs:
@@ -82,8 +86,9 @@ def _call_claude_sync(
         except (ProcessLookupError, OSError):
             pass
         proc.wait()
-        if proc in _active_procs:
-            _active_procs.remove(proc)
+        procs = _active_procs.get(proc_key, [])
+        if proc in procs:
+            procs.remove(proc)
         raise RuntimeError(f"Run {run_id} cancelled during startup")
 
     lines: list[str] = []
@@ -116,8 +121,11 @@ def _call_claude_sync(
         proc.wait()
         raise
     finally:
-        if proc in _active_procs:
-            _active_procs.remove(proc)
+        procs = _active_procs.get(proc_key, [])
+        if proc in procs:
+            procs.remove(proc)
+        if not procs and proc_key in _active_procs:
+            del _active_procs[proc_key]
 
     # 취소로 인한 종료인 경우 예외 발생
     if run_id and run_id in _cancelled_runs:
@@ -144,7 +152,7 @@ async def call_claude_streaming(
 
 
 async def execute_with_lock(coro, run_id: str | None = None):
-    """실행 전 취소 여부 확인 후 코루틴 실행. (이전의 전역 락은 제거됨)"""
+    """실행 전 취소 여부 확인 후 코루틴 실행."""
     if run_id and run_id in _cancelled_runs:
         logger.info("이미 취소된 Run: run_id=%s", run_id)
         raise RuntimeError(f"Run {run_id} was cancelled")
@@ -152,15 +160,32 @@ async def execute_with_lock(coro, run_id: str | None = None):
 
 
 async def cancel_current(run_id: str | None = None):
-    """현재 실행 중인 CLI 프로세스 전체 종료 및 취소 목록 등록."""
+    """현재 실행 중인 CLI 프로세스 종료 및 취소 목록 등록.
+
+    run_id가 주어지면 해당 run의 프로세스만 종료.
+    run_id=None이면 전체 종료 (서버 종료 시 사용).
+    """
     if run_id:
         _cancelled_runs.add(run_id)
-    
-    if not _active_procs:
+        procs = list(_active_procs.get(run_id, []))
+        if not procs:
+            return
+        logger.info("Claude CLI 취소 요청 (단일 run): run_id=%s, count=%d", run_id, len(procs))
+        for proc in procs:
+            if proc.poll() is None:
+                try:
+                    os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+                except (ProcessLookupError, OSError):
+                    pass
         return
 
-    logger.info("Claude CLI 취소 요청 (일괄 종료): count=%d", len(_active_procs))
-    for proc in list(_active_procs):
+    # run_id=None: 전체 종료
+    all_procs = [p for procs in _active_procs.values() for p in procs]
+    if not all_procs:
+        return
+
+    logger.info("Claude CLI 취소 요청 (전체): count=%d", len(all_procs))
+    for proc in all_procs:
         if proc.poll() is None:
             try:
                 os.killpg(os.getpgid(proc.pid), signal.SIGTERM)

@@ -61,9 +61,27 @@ class StreamManager:
                         del self.last_content[k]
         logger.debug("Unsubscribed from stream: run_id=%s, queue_id=%s", run_id, id(queue))
 
+    _TERMINAL_STATUSES = {"done", "error", "cancelled"}
+    _CACHE_TTL = 30.0  # terminal 상태 후 캐시 유지 시간 (초)
+
+    async def _schedule_cache_cleanup(self, run_id: str):
+        """terminal 상태 브로드캐스트 후 TTL 만료 시 캐시 자동 정리."""
+        await asyncio.sleep(self._CACHE_TTL)
+        async with self.lock:
+            # 아직 구독자가 있으면 unsubscribe 시 정리되므로 건너뜀
+            if run_id in self.queues:
+                return
+            self.last_status.pop(run_id, None)
+            self.agent_created.pop(run_id, None)
+            keys_to_del = [k for k in self.last_content if k.startswith(f"{run_id}:")]
+            for k in keys_to_del:
+                del self.last_content[k]
+        logger.debug("Auto-cleaned cache for run_id=%s", run_id)
+
     async def broadcast(self, run_id: str, data: Any):
         """특정 run_id를 구독 중인 모든 클라이언트에게 데이터 전송."""
         queues_to_send = []
+        schedule_cleanup = False
         async with self.lock:
             # JSON 직렬화
             json_data = json.dumps(data, ensure_ascii=False)
@@ -73,6 +91,8 @@ class StreamManager:
             if event_type == "status":
                 self.last_status[run_id] = json_data
                 logger.debug("Cached last status for run_id=%s: %s", run_id, data.get("status"))
+                if data.get("status") in self._TERMINAL_STATUSES:
+                    schedule_cleanup = True
             elif event_type == "agent_message_created":
                 if run_id not in self.agent_created:
                     self.agent_created[run_id] = []
@@ -84,11 +104,14 @@ class StreamManager:
             if run_id in self.queues:
                 # 큐 목록 복사 (락 범위 축소)
                 queues_to_send = list(self.queues[run_id])
-        
+
+        if schedule_cleanup:
+            asyncio.create_task(self._schedule_cache_cleanup(run_id))
+
         if not queues_to_send:
             logger.debug("No subscribers for run_id=%s", run_id)
             return
-            
+
         logger.debug("Broadcasting to %d subscribers for run_id=%s", len(queues_to_send), run_id)
         for queue in queues_to_send:
             await queue.put(json_data)
