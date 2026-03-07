@@ -20,12 +20,15 @@ interface Props {
 function formatDate(iso: string): string {
   const date = new Date(iso)
   const now = new Date()
-  const diffMs = now.getTime() - date.getTime()
-  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24))
+  const time = date.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false })
 
-  if (diffDays === 0) return '오늘'
-  if (diffDays === 1) return '어제'
-  return date.toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' })
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const yesterday = new Date(today.getTime() - 86400000)
+  const dateOnly = new Date(date.getFullYear(), date.getMonth(), date.getDate())
+
+  if (dateOnly.getTime() === today.getTime()) return `오늘 ${time}`
+  if (dateOnly.getTime() === yesterday.getTime()) return `어제 ${time}`
+  return date.toLocaleDateString('ko-KR', { month: 'numeric', day: 'numeric' }) + ` ${time}`
 }
 
 export default function SessionList({

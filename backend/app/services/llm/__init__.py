@@ -17,8 +17,8 @@ def get_allowed_provider_names() -> list[str]:
 
 
 def get_provider(name: str) -> LLMProvider:
-    """이름에 해당하는 LLM Provider를 반환합니다. 기본값은 claude-cli입니다."""
-    return _providers.get(name, _providers["claude-cli"])
+    """이름에 해당하는 LLM Provider를 반환합니다. 기본값은 gemini-cli입니다."""
+    return _providers.get(name, _providers["gemini-cli"])
 
 
 __all__ = ["get_provider", "get_allowed_provider_names", "LLMProvider"]

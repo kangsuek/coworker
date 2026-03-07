@@ -45,7 +45,7 @@ class Session(Base):
 
     id: Mapped[str] = mapped_column(primary_key=True, default=lambda: str(uuid.uuid4()))
     title: Mapped[str | None] = mapped_column(Text, default=None)
-    llm_provider: Mapped[str] = mapped_column(Text, default="claude-cli", server_default="claude-cli")
+    llm_provider: Mapped[str] = mapped_column(Text, default="gemini-cli", server_default="gemini-cli")
     llm_model: Mapped[str | None] = mapped_column(Text, default=None)
     custom_roles: Mapped[str | None] = mapped_column(Text, default=None)  # JSON: {"역할명": "프롬프트"}
     created_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(UTC))

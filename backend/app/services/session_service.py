@@ -14,8 +14,8 @@ from app.models import db as models
 
 async def create_session(
     db: AsyncSession,
-    llm_provider: str = "claude-cli",
-    llm_model: str | None = None
+    llm_provider: str = "gemini-cli",
+    llm_model: str | None = "gemini-3-flash-preview"
 ) -> models.Session:
     """새 세션 생성."""
     sess = models.Session(llm_provider=llm_provider, llm_model=llm_model)
@@ -52,7 +52,7 @@ async def list_sessions(
     """전체 세션 목록 (최신순, limit/offset 페이징)."""
     result = await db.execute(
         select(models.Session)
-        .order_by(models.Session.created_at.desc())
+        .order_by(models.Session.updated_at.desc())
         .limit(limit)
         .offset(offset)
     )
@@ -76,10 +76,12 @@ async def create_user_message(
     content: str,
     mode: str | None = None,
 ) -> models.UserMessage:
-    """유저/리더 메시지 생성. user 역할인 경우 세션 제목 자동 설정."""
-    if role == "user":
-        session = await db.get(models.Session, session_id)
-        if session is not None and session.title is None:
+    """유저/리더 메시지 생성. user 역할인 경우 세션 제목 자동 설정. 항상 updated_at 갱신."""
+    session = await db.get(models.Session, session_id)
+    if session is not None:
+        # 메시지가 추가될 때마다 세션 updated_at 갱신 (최근 활동순 정렬 기준)
+        session.updated_at = datetime.now(UTC)
+        if role == "user" and session.title is None:
             from app.config import settings
             triggers = [t for t in [settings.team_trigger_header, settings.role_add_trigger] if t]
             if not any(content.startswith(t) for t in triggers):

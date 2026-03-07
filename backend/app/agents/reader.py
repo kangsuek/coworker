@@ -49,11 +49,21 @@ def _today_context() -> str:
 
 
 def _memory_context(memories: list) -> str:
-    """전역 메모리 목록을 프롬프트 컨텍스트 문자열로 변환. 메모리가 없으면 빈 문자열 반환."""
+    """전역 메모리 목록을 프롬프트 컨텍스트 문자열로 변환.
+
+    메모리가 없을 때도 빈 섹션을 명시하여 이전 대화 이력에 남은
+    삭제된 메모리 내용을 LLM이 재참조하지 않도록 방지한다.
+    """
     if not memories:
-        return ""
+        return (
+            "[전역 메모리 — 현재 저장된 메모리가 없습니다. "
+            "이전 대화에서 메모리 내용이 언급됐더라도 이미 삭제된 것이므로 절대 참조하지 마세요.]\n\n"
+        )
     items = "\n".join(f"- {m.content}" for m in memories)
-    return f"[전역 메모리 — 항상 참고할 정보]\n{items}\n\n"
+    return (
+        f"[전역 메모리 — 아래 목록만 유효합니다. 목록에 없는 내용은 삭제된 메모리이므로 참조하지 마세요.]\n"
+        f"{items}\n\n"
+    )
 
 
 def _build_conversation_prompt(user_message: str, history: list) -> str:
@@ -121,7 +131,7 @@ class ReaderAgent:
             current_msg_id = run.user_message_id if run else None
 
             session = await self.db.get(models.Session, session_id)
-            provider_name = session.llm_provider if session and session.llm_provider else "claude-cli"
+            provider_name = session.llm_provider if session and session.llm_provider else "gemini-cli"
             self.llm_provider = get_provider(provider_name)
             self.provider_name = provider_name
             self.session_model = session.llm_model if session else None

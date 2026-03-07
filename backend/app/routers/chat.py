@@ -69,7 +69,7 @@ async def create_chat(
     if session is None:
         session = await create_session(
             db,
-            llm_provider=req.llm_provider or "claude-cli",
+            llm_provider=req.llm_provider or "gemini-cli",
             llm_model=req.llm_model
         )
 

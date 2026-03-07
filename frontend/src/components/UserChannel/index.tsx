@@ -26,7 +26,7 @@ export default function UserChannel({
   runId,
   runStatus,
   soloStreamingContent = '',
-  llmProvider = 'claude-cli',
+  llmProvider = 'gemini-cli',
   llmModel = '',
   onMessageAdded,
   onSessionCreated,
