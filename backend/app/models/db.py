@@ -87,6 +87,14 @@ class AgentMessage(Base):
     session: Mapped["Session"] = relationship(back_populates="agent_messages")
 
 
+class GlobalMemory(Base):
+    __tablename__ = "global_memories"
+
+    id: Mapped[str] = mapped_column(primary_key=True, default=lambda: str(uuid.uuid4()))
+    content: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(UTC))
+
+
 class Run(Base):
     __tablename__ = "runs"
 

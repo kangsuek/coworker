@@ -2,6 +2,7 @@ import type {
   AgentMessagesResponse,
   ChatRequest,
   ChatResponse,
+  Memory,
   RunStatus,
   Session,
   SessionDetail,
@@ -66,4 +67,7 @@ export const api = {
   getSession: (id: string) => get<SessionDetail>(`/sessions/${id}`),
   updateSession: (id: string, title: string) => patch<Session>(`/sessions/${id}`, { title }),
   deleteSession: (id: string) => del(`/sessions/${id}`),
+  getMemories: () => get<Memory[]>('/memories'),
+  createMemory: (content: string) => post<Memory>('/memories', { content }),
+  deleteMemory: (id: string) => del(`/memories/${id}`),
 }

@@ -316,6 +316,36 @@ async def update_agent_message_status(
     return msg
 
 
+async def get_all_memories(db: AsyncSession) -> list[models.GlobalMemory]:
+    """전역 메모리 전체 목록 (생성순)."""
+    result = await db.execute(
+        select(models.GlobalMemory).order_by(models.GlobalMemory.created_at)
+    )
+    return list(result.scalars().all())
+
+
+async def create_memory(db: AsyncSession, content: str) -> models.GlobalMemory:
+    """전역 메모리 항목 생성. 빈 내용은 ValueError 발생."""
+    content = content.strip()
+    if not content:
+        raise ValueError("메모리 내용이 비어 있습니다.")
+    mem = models.GlobalMemory(content=content)
+    db.add(mem)
+    await db.commit()
+    await db.refresh(mem)
+    return mem
+
+
+async def delete_memory(db: AsyncSession, memory_id: str) -> bool:
+    """전역 메모리 항목 삭제. 없으면 False."""
+    mem = await db.get(models.GlobalMemory, memory_id)
+    if mem is None:
+        return False
+    await db.delete(mem)
+    await db.commit()
+    return True
+
+
 async def get_agent_messages(
     db: AsyncSession, run_id: str
 ) -> list[models.AgentMessage]:

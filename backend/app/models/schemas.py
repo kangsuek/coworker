@@ -144,3 +144,16 @@ class ClassificationResult(BaseModel):
 class LLMClassificationResponse(BaseModel):
     """LLM이 각 태스크의 역할과 의존성을 분석한 결과."""
     agents: list[AgentPlan]
+
+
+# --- 전역 메모리 ---
+
+
+class MemoryCreateRequest(BaseModel):
+    content: str
+
+
+class MemoryOut(BaseModel):
+    id: str
+    content: str
+    created_at: UTCDatetime

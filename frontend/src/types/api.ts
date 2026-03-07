@@ -82,3 +82,9 @@ export interface SessionDetail extends Session {
   messages: UserMessage[]
   last_team_run_id?: string | null
 }
+
+export interface Memory {
+  id: string
+  content: string
+  created_at: string
+}

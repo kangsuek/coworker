@@ -5,6 +5,7 @@ import AgentChannel from './components/AgentChannel'
 import ErrorBoundary from './components/ErrorBoundary'
 import SessionList from './components/SessionList'
 import UserChannel from './components/UserChannel'
+import { useMemory } from './hooks/useMemory'
 import { useRunSSE } from './hooks/useRunSSE'
 import { useSession } from './hooks/useSession'
 import { api } from './lib/api'
@@ -52,6 +53,7 @@ function App() {
   const [currentRunId, setCurrentRunId] = useState<string | null>(null)
   const [historicalAgentMessages, setHistoricalAgentMessages] = useState<AgentMessage[]>([])
   const session = useSession()
+  const { memories, addMemory, removeMemory, refreshMemories } = useMemory()
 
   const [llmProvider, setLlmProvider] = useState('gemini-cli')
   const [llmModel, setLlmModel] = useState('gemini-3-flash-preview')
@@ -88,6 +90,10 @@ function App() {
         api.getAgentMessages(runId)
           .then(({ messages }) => setHistoricalAgentMessages(messages))
           .catch(() => {})
+      }
+      // BUG-01: 채팅 트리거로 메모리 저장 후 사이드바 즉시 갱신
+      if (response.startsWith('✅ 기억했습니다')) {
+        refreshMemories()
       }
       session.addMessage({
         id: crypto.randomUUID(),
@@ -197,6 +203,9 @@ function App() {
           theme={theme}
           onThemeToggle={toggleTheme}
           onCloseMobile={() => setIsSidebarOpen(false)}
+          memories={memories}
+          onAddMemory={addMemory}
+          onDeleteMemory={removeMemory}
         />
       </div>
 

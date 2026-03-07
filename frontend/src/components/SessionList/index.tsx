@@ -1,6 +1,6 @@
-import { Sun, Moon, Trash2, Plus, X, Pencil, Check } from 'lucide-react'
+import { Sun, Moon, Trash2, Plus, X, Pencil, Check, Brain, ChevronDown, ChevronUp } from 'lucide-react'
 import { useRef, useState } from 'react'
-import type { Session } from '../../types/api'
+import type { Memory, Session } from '../../types/api'
 
 interface Props {
   sessions: Session[]
@@ -12,6 +12,9 @@ interface Props {
   theme: 'light' | 'dark'
   onThemeToggle: () => void
   onCloseMobile?: () => void
+  memories: Memory[]
+  onAddMemory: (content: string) => Promise<void>
+  onDeleteMemory: (id: string) => Promise<void>
 }
 
 function formatDate(iso: string): string {
@@ -35,11 +38,24 @@ export default function SessionList({
   theme,
   onThemeToggle,
   onCloseMobile,
+  memories,
+  onAddMemory,
+  onDeleteMemory,
 }: Props) {
   const isDarkMode = theme === 'dark'
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editingTitle, setEditingTitle] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
+  const [memoryOpen, setMemoryOpen] = useState(false)
+  const [memoryInput, setMemoryInput] = useState('')
+  const memoryInputRef = useRef<HTMLInputElement>(null)
+
+  const handleAddMemory = async () => {
+    const content = memoryInput.trim()
+    if (!content) return
+    setMemoryInput('')
+    await onAddMemory(content)
+  }
 
   const startEdit = (e: React.MouseEvent, session: Session) => {
     e.stopPropagation()
@@ -159,9 +175,92 @@ export default function SessionList({
         })}
       </div>
 
+      {/* Memory Panel */}
+      <div className={`border-t shrink-0 ${isDarkMode ? 'border-zinc-800' : 'border-zinc-200'}`}>
+        <button
+          onClick={() => setMemoryOpen((v) => !v)}
+          className={`w-full flex items-center justify-between px-4 py-3 text-sm font-semibold transition-colors
+            ${isDarkMode ? 'text-zinc-400 hover:text-zinc-200' : 'text-zinc-500 hover:text-zinc-800'}
+          `}
+        >
+          <span className="flex items-center gap-2">
+            <Brain size={15} />
+            전역 메모리
+            {memories.length > 0 && (
+              <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold
+                ${isDarkMode ? 'bg-emerald-900/40 text-emerald-400' : 'bg-emerald-100 text-emerald-700'}
+              `}>
+                {memories.length}
+              </span>
+            )}
+          </span>
+          {memoryOpen ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
+        </button>
+
+        {memoryOpen && (
+          <div className="px-3 pb-3 space-y-2">
+            {/* 메모리 목록 */}
+            {memories.length > 0 ? (
+              <div className={`rounded-lg border divide-y max-h-40 overflow-y-auto scrollbar-hide
+                ${isDarkMode ? 'border-zinc-700 divide-zinc-700' : 'border-zinc-200 divide-zinc-200'}
+              `}>
+                {memories.map((mem) => (
+                  <div key={mem.id} className="flex items-start gap-2 px-3 py-2 group">
+                    <p className={`flex-1 text-xs leading-relaxed break-words min-w-0
+                      ${isDarkMode ? 'text-zinc-300' : 'text-zinc-700'}
+                    `}>
+                      {mem.content}
+                    </p>
+                    <button
+                      onClick={() => onDeleteMemory(mem.id)}
+                      className={`shrink-0 opacity-0 group-hover:opacity-100 p-0.5 rounded transition-all
+                        ${isDarkMode ? 'text-zinc-500 hover:text-red-400' : 'text-zinc-400 hover:text-red-500'}
+                      `}
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className={`text-xs px-1 ${isDarkMode ? 'text-zinc-600' : 'text-zinc-400'}`}>
+                저장된 메모리가 없습니다.
+              </p>
+            )}
+
+            {/* 메모리 추가 입력 */}
+            <div className={`flex gap-1.5 rounded-lg border p-1
+              ${isDarkMode ? 'border-zinc-700 bg-zinc-900' : 'border-zinc-200 bg-zinc-50'}
+            `}>
+              <input
+                ref={memoryInputRef}
+                value={memoryInput}
+                onChange={(e) => setMemoryInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') handleAddMemory() }}
+                placeholder="기억할 내용..."
+                className={`flex-1 text-xs bg-transparent outline-none px-1
+                  ${isDarkMode ? 'text-zinc-200 placeholder:text-zinc-600' : 'text-zinc-800 placeholder:text-zinc-400'}
+                `}
+              />
+              <button
+                onClick={handleAddMemory}
+                disabled={!memoryInput.trim()}
+                className={`shrink-0 px-2 py-1 rounded-md text-xs font-medium transition-colors
+                  ${memoryInput.trim()
+                    ? 'bg-emerald-600 hover:bg-emerald-500 text-white'
+                    : isDarkMode ? 'bg-zinc-700 text-zinc-500 cursor-not-allowed' : 'bg-zinc-200 text-zinc-400 cursor-not-allowed'}
+                `}
+              >
+                추가
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
       {/* New Session Button */}
-      <div className="p-4 mt-auto">
-        <button 
+      <div className="p-4">
+        <button
           onClick={onCreate}
           className="w-full h-10 flex items-center justify-center gap-2 rounded-xl font-semibold transition-all active:scale-[0.98] bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
         >

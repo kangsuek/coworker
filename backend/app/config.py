@@ -28,6 +28,9 @@ class Settings(BaseSettings):
     # 세션 내 커스텀 역할 정의 트리거 (예: "(역할추가) Friend: 당신은 친근한 친구입니다.")
     role_add_trigger: str = "(역할추가)"
 
+    # 전역 메모리 저장 트리거 키워드
+    memory_trigger: str = "(기억)"
+
     # 분류: 역할별 키워드 (쉼표 구분, 미설정 시 기본값 사용)
     role_researcher_keywords: str = "조사,리서치,분석,시장,경쟁사,데이터 수집,현황,정보 수집"
     role_writer_keywords: str = "마케팅,홍보,카피,콘텐츠,글쓰기,작성,문서,보고서"

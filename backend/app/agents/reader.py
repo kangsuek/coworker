@@ -26,7 +26,9 @@ from app.services.llm import get_provider
 from app.services.session_service import (
     add_custom_role,
     create_agent_message,
+    create_memory,
     create_user_message,
+    get_all_memories,
     get_custom_roles,
     get_recent_messages,
     update_agent_message_content,
@@ -44,6 +46,14 @@ def _today_context() -> str:
     """오늘 날짜를 에이전트 프롬프트 상단에 삽입할 컨텍스트 문자열로 반환."""
     today = datetime.now(UTC).strftime("%Y년 %m월 %d일")
     return f"[오늘 날짜: {today}]\n\n"
+
+
+def _memory_context(memories: list) -> str:
+    """전역 메모리 목록을 프롬프트 컨텍스트 문자열로 변환. 메모리가 없으면 빈 문자열 반환."""
+    if not memories:
+        return ""
+    items = "\n".join(f"- {m.content}" for m in memories)
+    return f"[전역 메모리 — 항상 참고할 정보]\n{items}\n\n"
 
 
 def _build_conversation_prompt(user_message: str, history: list) -> str:
@@ -116,6 +126,75 @@ class ReaderAgent:
             self.provider_name = provider_name
             self.session_model = session.llm_model if session else None
 
+            # 전역 메모리 저장 트리거 감지
+            _MEMORY_TRIGGER = settings.memory_trigger  # BUG-08: 환경변수로 설정 가능
+            _team_header = settings.team_trigger_header.strip()
+            # BUG-07: 팀모드 메시지에 (기억)이 포함돼도 메모리 트리거로 오인식하지 않도록 예외 처리
+            _is_team_trigger = bool(_team_header and user_message.startswith(_team_header))
+            if not _is_team_trigger and _MEMORY_TRIGGER in user_message:
+                # BUG-02: thinking 상태를 메모리 처리 전에 먼저 업데이트 (queued→done 직접 점프 방지)
+                async with self.db_lock:
+                    await update_run_status(
+                        self.db, run_id, "thinking", thinking_started_at=datetime.now(UTC)
+                    )
+                # BUG-03: 직접 저장은 "(기억) " (공백 필수) 형식만 허용
+                _is_direct = (
+                    user_message.startswith(_MEMORY_TRIGGER)
+                    and len(user_message) > len(_MEMORY_TRIGGER)
+                    and user_message[len(_MEMORY_TRIGGER)] in (' ', '\t', '\n')
+                )
+                if _is_direct:
+                    # 직접 저장: "(기억) 기억할 내용"
+                    content = user_message[len(_MEMORY_TRIGGER):].strip()
+                    if not content:
+                        reply = f"⚠️ 기억할 내용을 입력해주세요.\n\n형식: `{_MEMORY_TRIGGER} 기억할 내용`"
+                        async with self.db_lock:
+                            await create_user_message(self.db, session_id, "reader", reply, mode="solo")
+                            await update_run_status(
+                                self.db, run_id, "done",
+                                response=reply, mode="solo", finished_at=datetime.now(UTC),
+                            )
+                        return
+                else:
+                    # LLM 생성 후 저장: "대화를 요약해서 (기억)에 저장해줘" 등 자연어 요청
+                    history = await get_recent_messages(
+                        self.db, session_id, limit=_HISTORY_MSG_LIMIT, exclude_id=current_msg_id
+                    )
+                    model_to_use = self.session_model or settings.solo_model
+                    _MEMORY_GEN_PROMPT = (
+                        "사용자의 요청을 처리하여 전역 메모리에 저장할 내용을 생성하세요. "
+                        "저장할 내용만 간결하게 출력하세요. 설명, 인사, 확인 문구는 절대 포함하지 마세요."
+                    )
+                    prompt = (
+                        _today_context()
+                        + _build_conversation_prompt(user_message, history)
+                    )
+                    content = await self.llm_provider.stream_generate(
+                        _MEMORY_GEN_PROMPT, prompt, model=model_to_use, run_id=run_id
+                    )
+                    content = content.strip()
+                    # BUG-04: LLM이 빈 응답 반환 시 빈 메모리 저장 차단
+                    if not content:
+                        reply = "⚠️ 메모리 생성에 실패했습니다. (LLM이 빈 응답 반환)"
+                        async with self.db_lock:
+                            await create_user_message(self.db, session_id, "reader", reply, mode="solo")
+                            await update_run_status(
+                                self.db, run_id, "done",
+                                response=reply, mode="solo", finished_at=datetime.now(UTC),
+                            )
+                        return
+
+                # BUG-06: create_memory를 db_lock 블록 안에서 실행 (코드 일관성)
+                async with self.db_lock:
+                    mem = await create_memory(self.db, content)
+                    reply = f"✅ 기억했습니다.\n\n> {mem.content}"
+                    await create_user_message(self.db, session_id, "reader", reply, mode="solo")
+                    await update_run_status(
+                        self.db, run_id, "done",
+                        response=reply, mode="solo", finished_at=datetime.now(UTC),
+                    )
+                return
+
             # 커스텀 역할 정의 지시문 감지: "(역할추가) 역할명: 프롬프트"
             trigger = settings.role_add_trigger.strip()
             if trigger and user_message.startswith(trigger):
@@ -143,6 +222,9 @@ class ReaderAgent:
                         response=reply, mode="solo", finished_at=datetime.now(UTC),
                     )
                 return
+
+            # 전역 메모리 로드 (모든 프롬프트에 자동 주입)
+            self.memories = await get_all_memories(self.db)
 
             # 세션 커스텀 역할 로드 (팀모드 분류 시 활용)
             self.custom_roles = await get_custom_roles(self.db, session_id)
@@ -255,7 +337,8 @@ class ReaderAgent:
         run_id가 있으면 LineBufferFlusher로 0.5초마다 SSE solo_content 이벤트를 broadcast하여
         프론트엔드 채팅창에 실시간 스트리밍 표시한다.
         """
-        prompt = _today_context() + _build_conversation_prompt(user_message, history or [])
+        memories = getattr(self, "memories", [])
+        prompt = _today_context() + _memory_context(memories) + _build_conversation_prompt(user_message, history or [])
         model_to_use = self.session_model or settings.solo_model
 
         if not run_id:
@@ -411,6 +494,7 @@ class ReaderAgent:
 
                 full_task = (
                     f"{_today_context()}"
+                    f"{_memory_context(getattr(self, 'memories', []))}"
                     f"[전체 프로젝트 요청]\n{user_message}\n\n"
                     f"[당신의 담당 태스크]\n{agent_plan.task}"
                 )
