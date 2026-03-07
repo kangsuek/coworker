@@ -77,7 +77,10 @@ export function useSession(): UseSessionResult {
   }, [])
 
   const addMessage = useCallback((msg: UserMessage) => {
-    setMessages((prev) => [...prev, msg])
+    setMessages((prev) => {
+      if (prev.some((m) => m.id === msg.id)) return prev
+      return [...prev, msg]
+    })
     if (msg.role === 'reader') {
       // 짧은 시간 내 연속 호출 시 목록 깜빡임 방지: 300ms 디바운스
       if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current)
@@ -97,7 +100,7 @@ export function useSession(): UseSessionResult {
     const pseudo: Session = {
       id: sessionId,
       title: null,
-      llm_provider: 'claude-cli',
+      llm_provider: 'gemini-cli',
       llm_model: null,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),

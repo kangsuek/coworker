@@ -37,14 +37,14 @@ export interface RunSSECallbacks {
 }
 
 interface SSEEvent {
-  type: 'connected' | 'status' | 'content' | 'agent_message_created' | 'agent_status_changed'
+  type: 'connected' | 'status' | 'content' | 'solo_content' | 'agent_message_created' | 'agent_status_changed'
   run_id?: string
   // status 이벤트 필드
   status?: string
   progress?: string | null
   mode?: 'solo' | 'team' | null
   finished_at?: string | null
-  // content 이벤트 필드
+  // content / solo_content 이벤트 필드
   agent?: string
   content?: string
   // agent_message_created 이벤트 필드
@@ -59,6 +59,7 @@ const INITIAL_RECONNECT_DELAY = 1000
 export function useRunSSE(runId: string | null, callbacks?: RunSSECallbacks) {
   const [runStatus, setRunStatus] = useState<RunStatus>(DEFAULT_RUN_STATUS)
   const [agentMessages, setAgentMessages] = useState<AgentMessage[]>([])
+  const [soloStreamingContent, setSoloStreamingContent] = useState<string>('')
   const [isConnected, setIsConnected] = useState(false)
 
   const esRef = useRef<EventSource | null>(null)
@@ -74,12 +75,16 @@ export function useRunSSE(runId: string | null, callbacks?: RunSSECallbacks) {
     if (!runId) {
       setRunStatus(DEFAULT_RUN_STATUS)
       setAgentMessages([])
+      setSoloStreamingContent('')
       setIsConnected(false)
       return
     }
 
     stoppedRef.current = false
     reconnectDelayRef.current = INITIAL_RECONNECT_DELAY
+
+    // React StrictMode에서 effect가 두 번 실행될 때 cleanup된 인스턴스가 콜백을 중복 호출하는 것을 방지
+    let cleaned = false
 
     const clearReconnectTimer = () => {
       if (reconnectTimerRef.current !== null) {
@@ -93,10 +98,13 @@ export function useRunSSE(runId: string | null, callbacks?: RunSSECallbacks) {
       esRef.current?.close()
       esRef.current = null
       setIsConnected(false)
+      setSoloStreamingContent('')
 
       // SSE status 이벤트에는 response가 없으므로 폴링 API로 최종 상태 가져오기
       try {
         const finalStatus = await api.getRunStatus(runId)
+        // cleanup된 effect 인스턴스(StrictMode 첫 번째 실행 등)는 콜백 호출 생략
+        if (cleaned) return
         setRunStatus(finalStatus)
         if (status === 'done' && finalStatus.response != null) {
           callbacksRef.current?.onDone?.(
@@ -111,6 +119,7 @@ export function useRunSSE(runId: string | null, callbacks?: RunSSECallbacks) {
           callbacksRef.current?.onCancelled?.()
         }
       } catch {
+        if (cleaned) return
         // API 오류 시 콜백만 호출
         if (status === 'done') callbacksRef.current?.onDone?.('', null, null, null)
         else if (status === 'error') callbacksRef.current?.onError?.(null)
@@ -152,6 +161,13 @@ export function useRunSSE(runId: string | null, callbacks?: RunSSECallbacks) {
             setAgentMessages((prev) =>
               prev.map((m) => (m.sender === agent ? { ...m, content } : m)),
             )
+          }
+          break
+        }
+
+        case 'solo_content': {
+          if (data.content !== undefined) {
+            setSoloStreamingContent(data.content)
           }
           break
         }
@@ -217,6 +233,7 @@ export function useRunSSE(runId: string | null, callbacks?: RunSSECallbacks) {
     connect()
 
     return () => {
+      cleaned = true
       stoppedRef.current = true
       clearReconnectTimer()
       esRef.current?.close()
@@ -228,6 +245,7 @@ export function useRunSSE(runId: string | null, callbacks?: RunSSECallbacks) {
   return {
     runStatus: runId ? runStatus : DEFAULT_RUN_STATUS,
     agentMessages,
+    soloStreamingContent,
     isConnected,
   }
 }

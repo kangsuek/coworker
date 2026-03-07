@@ -1,6 +1,7 @@
 """Gemini CLI Provider implementation."""
 
 import asyncio
+import json
 import logging
 import os
 import signal
@@ -19,7 +20,15 @@ def _call_gemini_sync(
     on_line: Callable[[str], None] | None = None,
     **kwargs,
 ) -> str:
-    """동기 함수: subprocess.Popen으로 Gemini CLI 실행, stdout 라인별 스트리밍."""
+    """동기 함수: subprocess.Popen으로 Gemini CLI 실행, stream-json 실시간 스트리밍.
+
+    --output-format stream-json 으로 실행하여 delta message 이벤트를 실시간으로
+    on_line 콜백에 전달한다. 각 delta chunk를 누적하여 최종 전체 텍스트를 반환한다.
+
+    Gemini stream-json 이벤트 구조:
+      {"type":"message","role":"assistant","content":"<증분 청크>","delta":true}
+      {"type":"result","status":"success",...}
+    """
     import app.services.cli_service as cli_service
 
     run_id: str | None = kwargs.get("run_id")
@@ -27,13 +36,13 @@ def _call_gemini_sync(
     timeout: int = kwargs.get("timeout", settings.claude_cli_timeout)
     model: str = kwargs.get("model", "")
 
-    # Gemini CLI 호출 명령어 구성
+    # Gemini CLI 호출 명령어 구성 (stream-json 실시간 스트리밍)
     combined_prompt = f"System: {system_prompt}\n\nUser: {user_message}"
-    cmd = ["gemini", "-p", combined_prompt]
+    cmd = ["gemini", "-p", combined_prompt, "--output-format", "stream-json"]
     if model:
         cmd.extend(["--model", model])
 
-    logger.debug("Gemini CLI 시작: run_id=%s, timeout=%ds", run_id, timeout)
+    logger.debug("Gemini CLI 시작: run_id=%s, model=%s", run_id, model)
 
     # Popen 직전 취소 확인
     if run_id and run_id in cli_service._cancelled_runs:
@@ -65,22 +74,39 @@ def _call_gemini_sync(
             procs.remove(proc)
         raise RuntimeError(f"Run {run_id} cancelled during startup")
 
-    lines: list[str] = []
+    # NDJSON 파싱: delta 청크 누적 → on_line 실시간 전달, 오류 보고용 raw 보관
+    collected: list[str] = []
+    chunks: list[str] = []  # delta 청크 누적 (최종 반환값 조립용)
     try:
         for line in proc.stdout:
             # 루프 내 취소 확인
             if run_id and run_id in cli_service._cancelled_runs:
                 logger.info("Gemini CLI 실행 중 중단: run_id=%s", run_id)
-                os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+                try:
+                    os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+                except (ProcessLookupError, OSError):
+                    pass
                 break
 
-            # Gemini CLI의 불필요한 시스템 메시지 필터링
-            if line.startswith("Loaded cached credentials") or line.startswith("[WARNING] --raw-output"):
+            collected.append(line)
+            stripped = line.strip()
+            if not stripped:
                 continue
-            
-            lines.append(line)
-            if on_line:
-                on_line(line)
+
+            # 비-JSON 시스템 메시지 무시 (e.g. "Loaded cached credentials.")
+            try:
+                obj = json.loads(stripped)
+            except json.JSONDecodeError:
+                continue
+
+            t = obj.get("type")
+            if t == "message" and obj.get("role") == "assistant" and obj.get("delta"):
+                chunk = obj.get("content", "")
+                if chunk:
+                    chunks.append(chunk)
+                    if on_line:
+                        on_line(chunk)
+
         proc.wait(timeout=timeout)
     except subprocess.TimeoutExpired:
         try:
@@ -108,11 +134,11 @@ def _call_gemini_sync(
         raise RuntimeError(f"Run {run_id} was cancelled")
 
     if proc.returncode != 0:
-        logger.error("Gemini CLI 비정상 종료: rc=%d, output_lines=%d", proc.returncode, len(lines))
-        raise RuntimeError(f"Gemini CLI error (rc={proc.returncode}): {''.join(lines)}")
+        logger.error("Gemini CLI 비정상 종료: rc=%d, output_lines=%d", proc.returncode, len(collected))
+        raise RuntimeError(f"Gemini CLI error (rc={proc.returncode}): {''.join(collected)}")
 
-    logger.info("Gemini CLI 완료: rc=%d, output_lines=%d", proc.returncode, len(lines))
-    return "".join(lines)
+    logger.info("Gemini CLI 완료: rc=%d, chunks=%d", proc.returncode, len(chunks))
+    return "".join(chunks)
 
 
 async def call_gemini_streaming(

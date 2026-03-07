@@ -40,6 +40,12 @@ CONTEXT_CHAR_LIMIT = int(os.getenv("CONTEXT_CHAR_LIMIT", "3000"))
 _HISTORY_MSG_LIMIT = 20  # 최근 20개 메시지 (약 10턴)
 
 
+def _today_context() -> str:
+    """오늘 날짜를 에이전트 프롬프트 상단에 삽입할 컨텍스트 문자열로 반환."""
+    today = datetime.now(UTC).strftime("%Y년 %m월 %d일")
+    return f"[오늘 날짜: {today}]\n\n"
+
+
 def _build_conversation_prompt(user_message: str, history: list) -> str:
     """이전 대화 이력을 포함한 프롬프트 생성.
 
@@ -244,15 +250,58 @@ class ReaderAgent:
     async def _solo_respond(
         self, user_message: str, history: list | None = None, run_id: str | None = None
     ) -> str:
-        """Solo 모드 응답 생성. history가 있으면 대화 이력을 프롬프트에 포함."""
-        prompt = _build_conversation_prompt(user_message, history or [])
+        """Solo 모드 응답 생성. history가 있으면 대화 이력을 프롬프트에 포함.
+
+        run_id가 있으면 LineBufferFlusher로 0.5초마다 SSE solo_content 이벤트를 broadcast하여
+        프론트엔드 채팅창에 실시간 스트리밍 표시한다.
+        """
+        prompt = _today_context() + _build_conversation_prompt(user_message, history or [])
         model_to_use = self.session_model or settings.solo_model
-        return await self.llm_provider.stream_generate(
-            self.SOLO_SYSTEM_PROMPT,
-            prompt,
-            model=model_to_use,
-            run_id=run_id,
-        )
+
+        if not run_id:
+            return await self.llm_provider.stream_generate(
+                self.SOLO_SYSTEM_PROMPT,
+                prompt,
+                model=model_to_use,
+                run_id=run_id,
+            )
+
+        # SSE 실시간 스트리밍용 콜백
+        accumulated: list[str] = []
+
+        async def solo_flush_callback(chunks: list[str]) -> None:
+            if not chunks:
+                return
+            accumulated.extend(chunks)
+            content = "".join(accumulated)
+            try:
+                from app.services.stream_service import stream_manager
+                await stream_manager.broadcast(run_id, {
+                    "type": "solo_content",
+                    "run_id": run_id,
+                    "content": content,
+                })
+            except Exception:
+                pass
+
+        flusher = LineBufferFlusher(solo_flush_callback, flush_interval=0.5)
+        flusher.start()
+
+        def on_line(chunk: str) -> None:
+            flusher.append(chunk)
+
+        try:
+            result = await self.llm_provider.stream_generate(
+                self.SOLO_SYSTEM_PROMPT,
+                prompt,
+                on_line=on_line,
+                model=model_to_use,
+                run_id=run_id,
+            )
+        finally:
+            await flusher.stop()
+
+        return result
 
     async def _team_execute(
         self,
@@ -361,6 +410,7 @@ class ReaderAgent:
                     flusher.append(line)
 
                 full_task = (
+                    f"{_today_context()}"
                     f"[전체 프로젝트 요청]\n{user_message}\n\n"
                     f"[당신의 담당 태스크]\n{agent_plan.task}"
                 )
@@ -445,7 +495,7 @@ class ReaderAgent:
         """모든 Agent 결과를 통합하는 CLI 호출."""
         parts = [f"[{name} 결과]:\n{result}" for name, result in results.items()]
         combined = "\n\n".join(parts)
-        prompt = f"사용자 요청: {user_message}\n\n{combined}"
+        prompt = f"{_today_context()}사용자 요청: {user_message}\n\n{combined}"
         model_to_use = self.session_model or settings.team_model
         return await self.llm_provider.stream_generate(
             _INTEGRATE_SYSTEM_PROMPT,

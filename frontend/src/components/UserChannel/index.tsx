@@ -11,6 +11,7 @@ interface Props {
   messages: UserMessage[]
   runId: string | null
   runStatus: RunStatus
+  soloStreamingContent?: string
   llmProvider?: string
   llmModel?: string
   onMessageAdded: (msg: UserMessage) => void
@@ -24,6 +25,7 @@ export default function UserChannel({
   messages,
   runId,
   runStatus,
+  soloStreamingContent = '',
   llmProvider = 'claude-cli',
   llmModel = '',
   onMessageAdded,
@@ -51,7 +53,7 @@ export default function UserChannel({
   // 자동 스크롤
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages, runId])
+  }, [messages, runId, soloStreamingContent])
 
   const handleSend = async () => {
     const isRunning = submitting || runId !== null
@@ -118,9 +120,20 @@ export default function UserChannel({
           )}
 
           {runId && (
-            <div className="flex justify-start mt-2">
-              <StatusBadge status={runStatus.status} progress={runStatus.progress} model={runStatus.model} timing={runStatus.timing} />
-            </div>
+            soloStreamingContent ? (
+              <div className="flex justify-start mt-2">
+                <div className="px-4 py-3 rounded-xl border bg-zinc-100 border-zinc-200 text-zinc-700 dark:bg-zinc-900/80 dark:border-zinc-800 dark:text-zinc-300 text-[14px] max-w-[85%] sm:max-w-[80%]">
+                  <p className="leading-relaxed whitespace-pre-wrap break-words">
+                    {soloStreamingContent}
+                    <span className="inline-block w-1 h-3.5 bg-zinc-400 dark:bg-zinc-500 ml-0.5 animate-pulse align-middle" />
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <div className="flex justify-start mt-2">
+                <StatusBadge status={runStatus.status} progress={runStatus.progress} model={runStatus.model} timing={runStatus.timing} />
+              </div>
+            )
           )}
 
           <div ref={messagesEndRef} className="h-4"></div>

@@ -14,6 +14,7 @@ class StreamManager:
         self.last_status: dict[str, str] = {}          # run_id → 마지막 status 이벤트 JSON
         self.agent_created: dict[str, list[str]] = {}  # run_id → agent_message_created 이벤트 목록
         self.last_content: dict[str, str] = {}         # "{run_id}:{agent}" → 마지막 content 이벤트 JSON
+        self.last_solo_content: dict[str, str] = {}    # run_id → 마지막 solo_content 이벤트 JSON
         self.lock = asyncio.Lock()
 
     async def subscribe(self, run_id: str) -> asyncio.Queue:
@@ -37,6 +38,9 @@ class StreamManager:
             for key, event_json in self.last_content.items():
                 if key.startswith(f"{run_id}:"):
                     await queue.put(event_json)
+            # solo 모드 마지막 content 재전송
+            if run_id in self.last_solo_content:
+                await queue.put(self.last_solo_content[run_id])
             # 마지막 status 재전송
             if run_id in self.last_status:
                 await queue.put(self.last_status[run_id])
@@ -55,6 +59,7 @@ class StreamManager:
                     # 구독자가 모두 떠나면 캐시 정리
                     self.last_status.pop(run_id, None)
                     self.agent_created.pop(run_id, None)
+                    self.last_solo_content.pop(run_id, None)
                     # content 캐시 중 해당 run_id 항목 정리
                     keys_to_del = [k for k in self.last_content if k.startswith(f"{run_id}:")]
                     for k in keys_to_del:
@@ -73,6 +78,7 @@ class StreamManager:
                 return
             self.last_status.pop(run_id, None)
             self.agent_created.pop(run_id, None)
+            self.last_solo_content.pop(run_id, None)
             keys_to_del = [k for k in self.last_content if k.startswith(f"{run_id}:")]
             for k in keys_to_del:
                 del self.last_content[k]
@@ -100,6 +106,8 @@ class StreamManager:
             elif event_type == "content":
                 agent = data.get("agent", "")
                 self.last_content[f"{run_id}:{agent}"] = json_data
+            elif event_type == "solo_content":
+                self.last_solo_content[run_id] = json_data
 
             if run_id in self.queues:
                 # 큐 목록 복사 (락 범위 축소)

@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import signal
@@ -40,13 +41,16 @@ def _call_claude_sync(
     Args:
         system_prompt: 시스템 프롬프트
         user_message: 사용자 메시지
-        on_line: 각 stdout 라인마다 호출될 콜백
+        on_line: 각 토큰 청크마다 호출될 콜백 (stream-json 모드)
         **kwargs: output_json (bool), timeout (int), run_id (str)
+
+    output_json=True : --output-format json  (분류 전용, 완료 후 JSON 1개 반환)
+    output_json=False: --output-format stream-json --verbose --include-partial-messages
+                       (실시간 토큰 스트리밍, on_line 콜백으로 청크 전달)
     """
     run_id: str | None = kwargs.get("run_id")
     output_json: bool = kwargs.get("output_json", False)
     timeout: int = kwargs.get("timeout", settings.claude_cli_timeout)
-
     model: str = kwargs.get("model", "")
 
     cmd = [settings.claude_cli_path, "-p", user_message, "--system-prompt", system_prompt]
@@ -54,7 +58,10 @@ def _call_claude_sync(
         cmd.extend(["--model", model])
     if output_json:
         cmd.extend(["--output-format", "json"])
-    logger.debug("Claude CLI 시작: run_id=%s, model=%s", run_id, model)
+    else:
+        # 실시간 토큰 스트리밍: stream-json + verbose (필수) + include-partial-messages
+        cmd.extend(["--output-format", "stream-json", "--verbose", "--include-partial-messages"])
+    logger.debug("Claude CLI 시작: run_id=%s, model=%s, output_json=%s", run_id, model, output_json)
 
     # CLAUDECODE 환경변수 제거: Claude Code 세션 내에서 중첩 실행 방지
     child_env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
@@ -91,18 +98,48 @@ def _call_claude_sync(
             procs.remove(proc)
         raise RuntimeError(f"Run {run_id} cancelled during startup")
 
-    lines: list[str] = []
+    # output_json=True: 줄 누적 후 반환 / output_json=False: NDJSON 파싱 (오류 보고용 raw 보관)
+    collected: list[str] = []
+    final_result = ""  # stream-json 모드 전용: result 이벤트에서 추출
     try:
         for line in proc.stdout:
-            # 루프 내에서 취소 여부 수시 확인 (Bug 1.4 방어)
+            # 루프 내에서 취소 여부 수시 확인
             if run_id and run_id in _cancelled_runs:
                 logger.info("Claude CLI 실행 중 중단: run_id=%s", run_id)
-                os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+                try:
+                    os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+                except (ProcessLookupError, OSError):
+                    pass
                 break
 
-            lines.append(line)
-            if on_line:
-                on_line(line)
+            collected.append(line)
+
+            if output_json:
+                # json 모드: 전체 줄을 그대로 콜백 전달 (분류용)
+                if on_line:
+                    on_line(line)
+            else:
+                # stream-json 모드: NDJSON 파싱하여 토큰 청크만 on_line 전달
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                try:
+                    obj = json.loads(stripped)
+                except json.JSONDecodeError:
+                    continue
+
+                t = obj.get("type")
+                if t == "stream_event":
+                    ev = obj.get("event", {})
+                    if ev.get("type") == "content_block_delta":
+                        delta = ev.get("delta", {})
+                        if delta.get("type") == "text_delta":
+                            chunk = delta.get("text", "")
+                            if chunk and on_line:
+                                on_line(chunk)
+                elif t == "result" and obj.get("subtype") == "success":
+                    final_result = obj.get("result", "")
+
         proc.wait(timeout=timeout)
     except subprocess.TimeoutExpired:
         try:
@@ -132,11 +169,14 @@ def _call_claude_sync(
         raise RuntimeError(f"Run {run_id} was cancelled")
 
     if proc.returncode != 0:
-        logger.error("Claude CLI 비정상 종료: rc=%d, output_lines=%d", proc.returncode, len(lines))
-        raise RuntimeError(f"Claude CLI error (rc={proc.returncode}): {''.join(lines)}")
+        logger.error("Claude CLI 비정상 종료: rc=%d, output_lines=%d", proc.returncode, len(collected))
+        raise RuntimeError(f"Claude CLI error (rc={proc.returncode}): {''.join(collected)}")
 
-    logger.info("Claude CLI 완료: rc=%d, output_lines=%d", proc.returncode, len(lines))
-    return "".join(lines)
+    logger.info("Claude CLI 완료: rc=%d, output_lines=%d", proc.returncode, len(collected))
+
+    if output_json:
+        return "".join(collected)
+    return final_result
 
 
 async def call_claude_streaming(

@@ -53,14 +53,14 @@ function App() {
   const [historicalAgentMessages, setHistoricalAgentMessages] = useState<AgentMessage[]>([])
   const session = useSession()
 
-  const [llmProvider, setLlmProvider] = useState('claude-cli')
-  const [llmModel, setLlmModel] = useState('haiku')
+  const [llmProvider, setLlmProvider] = useState('gemini-cli')
+  const [llmModel, setLlmModel] = useState('gemini-3-flash-preview')
   const [prevSessionId, setPrevSessionId] = useState<string | undefined>(undefined)
 
   if (session.currentSession?.id !== prevSessionId) {
     setPrevSessionId(session.currentSession?.id)
-    setLlmProvider(session.currentSession?.llm_provider || 'claude-cli')
-    setLlmModel(session.currentSession?.llm_model || (session.currentSession?.llm_provider === 'gemini-cli' ? 'gemini-3-flash-preview' : 'haiku'))
+    setLlmProvider(session.currentSession?.llm_provider || 'gemini-cli')
+    setLlmModel(session.currentSession?.llm_model || (session.currentSession?.llm_provider === 'claude-cli' ? 'haiku' : 'gemini-3-flash-preview'))
   }
 
   useEffect(() => {
@@ -79,6 +79,7 @@ function App() {
   const {
     runStatus: currentRunStatus,
     agentMessages,
+    soloStreamingContent,
     isConnected: isSSEConnected,
   } = useRunSSE(currentRunId, {
     onDone: (response, mode, model, timing) => {
@@ -234,7 +235,7 @@ function App() {
                 onChange={(e) => {
                   const provider = e.target.value
                   setLlmProvider(provider)
-                  setLlmModel(provider === 'gemini-cli' ? 'gemini-3-flash-preview' : 'haiku')
+                  setLlmModel(provider === 'claude-cli' ? 'haiku' : 'gemini-3-flash-preview')
                 }}
                 className={`relative z-10 appearance-none bg-transparent pl-3 pr-7 py-1.5 font-medium outline-none cursor-pointer w-full min-w-0 ${isDarkMode ? 'text-zinc-300' : 'text-zinc-700'}`}
               >
@@ -276,6 +277,7 @@ function App() {
           messages={session.messages}
           runId={currentRunId}
           runStatus={currentRunStatus}
+          soloStreamingContent={soloStreamingContent}
           llmProvider={llmProvider}
           llmModel={llmModel}
           onMessageAdded={session.addMessage}

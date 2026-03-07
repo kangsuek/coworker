@@ -1,4 +1,8 @@
 import { Check, Loader2, X, CircleDot } from 'lucide-react'
+import ReactMarkdown from 'react-markdown'
+import rehypeHighlight from 'rehype-highlight'
+import remarkGfm from 'remark-gfm'
+
 import type { AgentMessage } from '../../types/api'
 
 const ROLE_COLORS: Record<string, string> = {
@@ -59,10 +63,31 @@ export default function AgentMessageCard({ message }: Props) {
         </div>
       </div>
 
-      <div className="text-[13px] leading-relaxed space-y-2 text-zinc-600 dark:text-zinc-300">
+      <div className="text-[13px] leading-relaxed text-zinc-600 dark:text-zinc-300">
         {message.content ? (
-          <div className="whitespace-pre-wrap break-words max-h-64 overflow-y-auto font-sans scrollbar-hide">
-            {message.content}
+          <div
+            className="max-h-96 overflow-y-auto scrollbar-hide max-w-none
+              [&_p]:mb-2 [&_p:last-child]:mb-0
+              [&_ul]:list-disc [&_ul]:pl-4 [&_ul]:mb-2
+              [&_ol]:list-decimal [&_ol]:pl-4 [&_ol]:mb-2
+              [&_li]:mb-1
+              [&_h1]:text-sm [&_h1]:font-bold [&_h1]:mb-2
+              [&_h2]:text-[13px] [&_h2]:font-bold [&_h2]:mb-2
+              [&_h3]:text-[13px] [&_h3]:font-semibold [&_h3]:mb-1
+              [&_pre]:my-2 [&_pre]:rounded-lg [&_pre]:overflow-x-auto [&_pre]:bg-zinc-200 [&_pre]:dark:bg-black/30 [&_pre]:p-3
+              [&_code]:font-mono [&_code]:text-[12px] [&_pre_code]:bg-transparent [&_pre_code]:p-0
+              [&_blockquote]:border-l-4 [&_blockquote]:border-zinc-400 [&_blockquote]:pl-3 [&_blockquote]:text-zinc-600 [&_blockquote]:dark:text-zinc-400
+              [&_hr]:my-3 [&_hr]:border-zinc-300 [&_hr]:dark:border-white/20
+              [&_a]:text-emerald-600 [&_a]:dark:text-emerald-400 [&_a]:underline [&_a]:break-all
+              [&_strong]:font-semibold
+              [&_table]:w-full [&_table]:my-2 [&_table]:border-collapse [&_table]:text-[12px]
+              [&_th]:border [&_th]:border-zinc-300 [&_th]:dark:border-white/20 [&_th]:px-2 [&_th]:py-1 [&_th]:text-left [&_th]:font-semibold [&_th]:bg-zinc-200 [&_th]:dark:bg-white/5
+              [&_td]:border [&_td]:border-zinc-300 [&_td]:dark:border-white/20 [&_td]:px-2 [&_td]:py-1
+              [&_tr]:border-b [&_tr]:border-zinc-200 [&_tr]:dark:border-white/10"
+          >
+            <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
+              {message.content}
+            </ReactMarkdown>
             {isWorking && (
               <span className="inline-block w-1 h-3.5 bg-zinc-400 dark:bg-zinc-500 ml-0.5 animate-pulse align-middle" />
             )}
