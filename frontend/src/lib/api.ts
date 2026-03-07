@@ -40,6 +40,16 @@ async function post<T>(path: string, body?: unknown): Promise<T> {
   return res.json()
 }
 
+async function patch<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetchWithRetry(`${API_BASE}${path}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) throw new Error(`PATCH ${path} failed: ${res.status}`)
+  return res.json()
+}
+
 async function del(path: string): Promise<void> {
   const res = await fetchWithRetry(`${API_BASE}${path}`, { method: 'DELETE' })
   if (!res.ok) throw new Error(`DELETE ${path} failed: ${res.status}`)
@@ -54,5 +64,6 @@ export const api = {
   getSessions: () => get<Session[]>('/sessions'),
   createSession: () => post<Session>('/sessions'),
   getSession: (id: string) => get<SessionDetail>(`/sessions/${id}`),
+  updateSession: (id: string, title: string) => patch<Session>(`/sessions/${id}`, { title }),
   deleteSession: (id: string) => del(`/sessions/${id}`),
 }

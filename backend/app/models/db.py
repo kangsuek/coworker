@@ -47,6 +47,7 @@ class Session(Base):
     title: Mapped[str | None] = mapped_column(Text, default=None)
     llm_provider: Mapped[str] = mapped_column(Text, default="claude-cli", server_default="claude-cli")
     llm_model: Mapped[str | None] = mapped_column(Text, default=None)
+    custom_roles: Mapped[str | None] = mapped_column(Text, default=None)  # JSON: {"역할명": "프롬프트"}
     created_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime] = mapped_column(
         default=lambda: datetime.now(UTC),

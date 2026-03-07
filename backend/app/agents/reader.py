@@ -24,8 +24,10 @@ from app.services.classification import classify_message
 from app.services.cli_service import LineBufferFlusher, cancel_current
 from app.services.llm import get_provider
 from app.services.session_service import (
+    add_custom_role,
     create_agent_message,
     create_user_message,
+    get_custom_roles,
     get_recent_messages,
     update_agent_message_content,
     update_agent_message_status,
@@ -107,6 +109,37 @@ class ReaderAgent:
             self.llm_provider = get_provider(provider_name)
             self.provider_name = provider_name
             self.session_model = session.llm_model if session else None
+
+            # 커스텀 역할 정의 지시문 감지: "(역할추가) 역할명: 프롬프트"
+            trigger = settings.role_add_trigger.strip()
+            if trigger and user_message.startswith(trigger):
+                rest = user_message[len(trigger):].strip()
+                if ":" in rest:
+                    role_name, prompt = rest.split(":", 1)
+                    role_name = role_name.strip()
+                    prompt = prompt.strip()
+                    if role_name and prompt:
+                        await add_custom_role(self.db, session_id, role_name, prompt)
+                        reply = f"✅ 역할 **{role_name}** 이(가) 이 세션에 등록되었습니다.\n\n> {prompt}"
+                        async with self.db_lock:
+                            await create_user_message(self.db, session_id, "reader", reply, mode="solo")
+                            await update_run_status(
+                                self.db, run_id, "done",
+                                response=reply, mode="solo", finished_at=datetime.now(UTC),
+                            )
+                        return
+                # 형식 오류 안내
+                reply = f"⚠️ 역할 추가 형식이 올바르지 않습니다.\n\n형식: `{trigger} 역할명: 시스템 프롬프트`\n\n예시: `{trigger} Friend: 당신은 친근한 친구입니다.`"
+                async with self.db_lock:
+                    await create_user_message(self.db, session_id, "reader", reply, mode="solo")
+                    await update_run_status(
+                        self.db, run_id, "done",
+                        response=reply, mode="solo", finished_at=datetime.now(UTC),
+                    )
+                return
+
+            # 세션 커스텀 역할 로드 (팀모드 분류 시 활용)
+            self.custom_roles = await get_custom_roles(self.db, session_id)
 
             async with self.db_lock:
                 await update_run_status(
@@ -200,6 +233,7 @@ class ReaderAgent:
             user_message,
             llm_provider=self.llm_provider,
             classify_model=classify_model,
+            custom_roles=getattr(self, "custom_roles", None),
         )
         logger.info(
             "_classify: mode=%s agents=%s provider=%s model=%s",
@@ -388,7 +422,10 @@ class ReaderAgent:
         Gemini CLI는 Google Search가 기본 활성화되어 있으므로
         Researcher에 웹 검색 활용 지침을 적용한다.
         """
-        if agent_plan.role == "Researcher" and self.provider_name == "gemini-cli":
+        custom_roles = getattr(self, "custom_roles", {}) or {}
+        if agent_plan.role in custom_roles:
+            system_prompt = custom_roles[agent_plan.role] + _AGENT_COMMON_INSTRUCTION
+        elif agent_plan.role == "Researcher" and self.provider_name == "gemini-cli":
             system_prompt = researcher.SYSTEM_PROMPT_WEB_SEARCH + _AGENT_COMMON_INSTRUCTION
         else:
             system_prompt = _PRESET_MAP.get(agent_plan.role, _PRESET_MAP["Researcher"])

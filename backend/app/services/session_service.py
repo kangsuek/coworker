@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 
 from sqlalchemy import delete, select
@@ -91,6 +92,47 @@ async def create_user_message(
     await db.commit()
     await db.refresh(msg)
     return msg
+
+
+async def update_session_title(db: AsyncSession, session_id: str, title: str) -> models.Session | None:
+    """세션 제목 업데이트."""
+    session = await db.get(models.Session, session_id)
+    if session is None:
+        return None
+    session.title = title.strip() or None
+    await db.commit()
+    await db.refresh(session)
+    return session
+
+
+async def get_custom_roles(db: AsyncSession, session_id: str) -> dict[str, str]:
+    """세션의 커스텀 역할 목록 반환. 없으면 빈 dict."""
+    session = await db.get(models.Session, session_id)
+    if session is None or not session.custom_roles:
+        return {}
+    try:
+        return json.loads(session.custom_roles)
+    except json.JSONDecodeError:
+        return {}
+
+
+async def add_custom_role(
+    db: AsyncSession, session_id: str, role_name: str, prompt: str
+) -> dict[str, str]:
+    """세션에 커스텀 역할 추가 후 전체 커스텀 역할 dict 반환."""
+    session = await db.get(models.Session, session_id)
+    if session is None:
+        return {}
+    existing = {}
+    if session.custom_roles:
+        try:
+            existing = json.loads(session.custom_roles)
+        except json.JSONDecodeError:
+            pass
+    existing[role_name] = prompt
+    session.custom_roles = json.dumps(existing, ensure_ascii=False)
+    await db.commit()
+    return existing
 
 
 async def create_run(db: AsyncSession, session_id: str, user_message_id: str) -> models.Run:

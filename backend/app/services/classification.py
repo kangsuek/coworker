@@ -18,6 +18,20 @@ from app.services.llm.base import LLMProvider
 
 # ── 규칙 기반 분류 ──────────────────────────────────────────────────────────
 
+_EXPLICIT_ROLE_RE = re.compile(r"^\[([^\]]+)\]\s*")
+
+
+def _parse_explicit_role(task: str) -> tuple[str, str | None]:
+    """태스크 텍스트에서 [역할명] 프리픽스 추출.
+
+    Returns:
+        (태스크 본문, 역할명 or None)
+    """
+    m = _EXPLICIT_ROLE_RE.match(task)
+    if m:
+        return task[m.end():].strip(), m.group(1).strip()
+    return task, None
+
 
 def _role_for_task(task: str) -> str:
     """태스크 텍스트에서 적합한 Agent 역할 결정.
@@ -35,17 +49,30 @@ async def _classify_with_llm(
     current_agents: list[AgentPlan],
     provider: LLMProvider,
     model: str = "",
+    custom_roles: dict[str, str] | None = None,
+    explicit_roles: dict[int, str] | None = None,
 ) -> list[AgentPlan]:
     """LLM을 사용하여 태스크의 역할과 의존성을 정교화합니다."""
 
-    # 가용한 역할 목록 및 설명
-    role_info = "\n".join([f"- {role}: {keywords}" for role, keywords in [
+    # 가용한 역할 목록 및 설명 (기본 역할 + 세션 커스텀 역할)
+    base_roles = [
         ("Researcher", settings.role_researcher_keywords),
         ("Writer", settings.role_writer_keywords),
         ("Planner", settings.role_planner_keywords),
         ("Coder", settings.role_coder_keywords),
         ("Reviewer", settings.role_reviewer_keywords),
-    ]])
+    ]
+    role_info_lines = [f"- {role}: {keywords}" for role, keywords in base_roles]
+    if custom_roles:
+        for role_name, prompt in custom_roles.items():
+            role_info_lines.append(f"- {role_name}: {prompt[:60]}...")
+    role_info = "\n".join(role_info_lines)
+
+    # 명시적으로 지정된 역할은 LLM에게 변경 금지 안내
+    locked_info = ""
+    if explicit_roles:
+        locked_lines = [f"  - 태스크 {i}: '{r}' (변경 불가)" for i, r in explicit_roles.items()]
+        locked_info = "\n\n[명시된 역할 — 반드시 유지]\n" + "\n".join(locked_lines)
 
     # 태스크 리스트 포맷팅
     tasks_str = "\n".join([f"{i}. {a.task}" for i, a in enumerate(current_agents)])
@@ -53,7 +80,7 @@ async def _classify_with_llm(
     system_prompt = f"""당신은 멀티 에이전트 시스템의 Planner입니다. 사용자의 요청과 태스크 목록을 분석하여 각 태스크에 가장 적합한 'role'과 'depends_on'을 JSON으로 응답하십시오.
 
 [역할 정의]
-{role_info}
+{role_info}{locked_info}
 
 [의존성 규칙]
 - 앞선 태스크의 결과가 필요한 경우 해당 인덱스(0부터 시작)를 'depends_on'에 추가.
@@ -89,9 +116,13 @@ async def _classify_with_llm(
                     # 인덱스가 범위를 벗어나지 않도록 필터링
                     agent.depends_on = [idx for idx in agent.depends_on if 0 <= idx < num_tasks]
                 
-                # 원본 태스크 내용이 LLM에 의해 변조되었을 경우를 대비해 순서대로 매칭 (옵션)
-                # 여기서는 LLM이 반환한 agents 리스트를 신뢰함
-                return response_obj.agents
+                # 명시된 역할은 LLM이 변경해도 원래 값으로 복원
+                result = response_obj.agents
+                if explicit_roles:
+                    for idx, role_name in explicit_roles.items():
+                        if idx < len(result):
+                            result[idx].role = role_name
+                return result
             except (json.JSONDecodeError, ValidationError):
                 continue
 
@@ -107,6 +138,7 @@ async def classify_message(
     user_message: str,
     llm_provider: LLMProvider | None = None,
     classify_model: str = "",
+    custom_roles: dict[str, str] | None = None,
 ) -> ClassificationResult:
     """Solo/Team 분류 및 지능형 태스크 분석.
 
@@ -130,9 +162,17 @@ async def classify_message(
 
     # 1차 에이전트 구성 (최대 5개, 기본적으로 순차적)
     agents: list[AgentPlan] = []
+    explicit_roles: dict[int, str] = {}  # index -> 명시된 역할명
     for i, task in enumerate(numbered_items[:5]):
+        task_body, explicit_role = _parse_explicit_role(task)
+        if explicit_role:
+            role = explicit_role
+            explicit_roles[i] = explicit_role
+        else:
+            task_body = task
+            role = _role_for_task(task)
         depends_on = [i - 1] if i > 0 else []
-        agents.append(AgentPlan(role=_role_for_task(task), task=task, depends_on=depends_on))
+        agents.append(AgentPlan(role=role, task=task_body, depends_on=depends_on))
 
     if len(agents) < 2:
         return ClassificationResult(
@@ -145,7 +185,9 @@ async def classify_message(
     # 2단계: LLM을 통한 역할 및 의존성 강화
     provider = llm_provider or get_provider("gemini-cli")
     try:
-        enhanced_agents = await _classify_with_llm(user_message, agents, provider, classify_model)
+        enhanced_agents = await _classify_with_llm(
+            user_message, agents, provider, classify_model, custom_roles, explicit_roles
+        )
         agents = enhanced_agents
     except Exception:
         # LLM 실패 시 1차 구성(규칙 기반) 유지 (Fallback)

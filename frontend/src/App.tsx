@@ -50,7 +50,7 @@ function App() {
   
   const [currentMode, setCurrentMode] = useState<'solo' | 'team' | null>(null)
   const [currentRunId, setCurrentRunId] = useState<string | null>(null)
-  const [historicalRunId, setHistoricalRunId] = useState<string | null>(null)
+  const [_historicalRunId, setHistoricalRunId] = useState<string | null>(null)
   const [historicalAgentMessages, setHistoricalAgentMessages] = useState<AgentMessage[]>([])
   const session = useSession()
 
@@ -199,6 +199,7 @@ function App() {
           onSwitch={handleSwitchSession}
           onCreate={handleCreateSession}
           onDeleteSession={handleDeleteSession}
+          onUpdateTitle={session.updateSessionTitle}
           theme={theme}
           onThemeToggle={toggleTheme}
           onCloseMobile={() => setIsSidebarOpen(false)}

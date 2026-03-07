@@ -31,7 +31,7 @@ export default function UserChannel({
   onSessionCreated,
   onModeChange,
   onRunChange,
-  agentMessages,
+  agentMessages: _agentMessages,
 }: Props) {
   const [input, setInput] = useState('')
   const [submitting, setSubmitting] = useState(false)

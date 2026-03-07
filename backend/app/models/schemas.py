@@ -27,6 +27,10 @@ class ChatRequest(BaseModel):
     llm_model: str | None = None
 
 
+class SessionUpdateRequest(BaseModel):
+    title: str
+
+
 # --- 응답 모델 ---
 
 
@@ -120,7 +124,7 @@ class SessionDetail(BaseModel):
 
 
 class AgentPlan(BaseModel):
-    role: Literal["Researcher", "Coder", "Reviewer", "Writer", "Planner"]
+    role: str  # 기본 역할 또는 커스텀 역할명
     task: str
     depends_on: list[int] = []
 

@@ -3,7 +3,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import Run, get_db
-from app.models.schemas import SessionDetail, SessionOut, TimingInfo, UserMessageOut
+from app.models.schemas import SessionDetail, SessionOut, SessionUpdateRequest, TimingInfo, UserMessageOut
 from app.services import session_service
 from app.services.cli_service import cancel_current
 
@@ -44,6 +44,26 @@ async def create_new_session(db: AsyncSession = Depends(get_db)):
         llm_model=sess.llm_model,
         created_at=sess.created_at,
         updated_at=sess.updated_at,
+    )
+
+
+@router.patch("/sessions/{session_id}", response_model=SessionOut)
+async def update_session(
+    session_id: str,
+    body: SessionUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """세션 제목 수정."""
+    session = await session_service.update_session_title(db, session_id, body.title)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return SessionOut(
+        id=session.id,
+        title=session.title,
+        llm_provider=session.llm_provider,
+        llm_model=session.llm_model,
+        created_at=session.created_at,
+        updated_at=session.updated_at,
     )
 
 

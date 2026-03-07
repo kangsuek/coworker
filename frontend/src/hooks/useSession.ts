@@ -10,6 +10,7 @@ export interface UseSessionResult {
   switchSession: (id: string) => Promise<SessionDetail>
   createSession: () => Promise<void>
   deleteSession: (id: string) => Promise<void>
+  updateSessionTitle: (id: string, title: string) => Promise<void>
   addMessage: (msg: UserMessage) => void
   setCurrentSessionFromChat: (sessionId: string) => void
   refreshSessions: () => Promise<void>
@@ -69,6 +70,12 @@ export function useSession(): UseSessionResult {
     }
   }, [])
 
+  const updateSessionTitle = useCallback(async (id: string, title: string) => {
+    const updated = await api.updateSession(id, title)
+    setSessions((prev) => prev.map((s) => (s.id === id ? updated : s)))
+    setCurrentSession((prev) => (prev?.id === id ? { ...prev, title: updated.title } : prev))
+  }, [])
+
   const addMessage = useCallback((msg: UserMessage) => {
     setMessages((prev) => [...prev, msg])
     if (msg.role === 'reader') {
@@ -118,6 +125,7 @@ export function useSession(): UseSessionResult {
     switchSession,
     createSession,
     deleteSession,
+    updateSessionTitle,
     addMessage,
     setCurrentSessionFromChat,
     refreshSessions,
