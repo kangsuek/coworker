@@ -5,6 +5,14 @@ import type { AgentMessage } from '../../types/api'
 import AgentMessageCard from './AgentMessage'
 import AgentStatusBar from './AgentStatusBar'
 
+const ROLE_PRESETS: { name: string; description: string }[] = [
+  { name: 'Researcher', description: '리서치 전문가. 사실에 기반하여 조사하고, 출처를 명시하며, 구조화된 보고서를 작성합니다.' },
+  { name: 'Writer', description: '테크니컬 라이터. 주어진 자료를 바탕으로 명확하고 읽기 쉬운 문서를 작성합니다.' },
+  { name: 'Planner', description: '프로젝트 플래너. 복잡한 작업을 단계별로 분해하고, 담당자와 산출물을 정의합니다.' },
+  { name: 'Coder', description: '시니어 소프트웨어 엔지니어. 클린 코드 작성, 에러 처리, 코드 설명을 제공합니다.' },
+  { name: 'Reviewer', description: '코드/문서 리뷰어. 논리적 오류, 개선점, 베스트 프랙티스 위반을 지적하고 대안을 제시합니다.' },
+]
+
 interface Props {
   mode: 'solo' | 'team' | null
   messages: AgentMessage[]
@@ -71,8 +79,19 @@ export default function AgentChannel({
   return (
     <div className="w-full h-full flex flex-col relative overflow-hidden">
       <header className="flex items-center justify-between p-3 border-b border-zinc-200 dark:border-zinc-800/80 bg-white dark:bg-zinc-950 shrink-0">
-        <div className="flex items-center gap-2">
-          <h2 className="text-sm font-bold text-zinc-800 dark:text-zinc-100">Agent Channel</h2>
+        <div className="flex items-center gap-2 flex-wrap min-w-0">
+          <h2 className="text-sm font-bold text-zinc-800 dark:text-zinc-100 shrink-0">Agent Channel</h2>
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {ROLE_PRESETS.map(({ name, description }) => (
+              <span
+                key={name}
+                title={description}
+                className="px-2 py-0.5 rounded text-[11px] font-medium bg-zinc-100 text-zinc-600 border border-zinc-200 dark:bg-zinc-800/60 dark:text-zinc-400 dark:border-zinc-700 cursor-help"
+              >
+                {name}
+              </span>
+            ))}
+          </div>
         </div>
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-3 text-xs font-bold text-zinc-500">
