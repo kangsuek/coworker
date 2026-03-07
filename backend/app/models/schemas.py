@@ -99,6 +99,9 @@ class UserMessageOut(BaseModel):
     role: str
     content: str
     mode: str | None
+    run_id: str | None = None
+    model: str | None = None
+    timing: TimingInfo | None = None
     created_at: UTCDatetime
 
 
@@ -110,6 +113,7 @@ class SessionDetail(BaseModel):
     created_at: UTCDatetime
     updated_at: UTCDatetime
     messages: list[UserMessageOut]
+    last_team_run_id: str | None = None
 
 
 # --- CLI 분류 결과 (F-001) ---

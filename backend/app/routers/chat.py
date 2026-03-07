@@ -136,7 +136,7 @@ async def cancel_run(run_id: str, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Run not found")
 
     if run.status in _CANCELLABLE_STATUSES:
-        await cancel_current()
+        await cancel_current(run_id=run_id)
         await update_run_status(db, run_id, "cancelled")
 
     final_status = "cancelled" if run.status in _CANCELLABLE_STATUSES else run.status

@@ -72,6 +72,7 @@ export interface UserMessage {
   role: string
   content: string
   mode: string | null
+  run_id?: string | null
   model?: string | null
   timing?: TimingInfo | null
   created_at: string
@@ -79,4 +80,5 @@ export interface UserMessage {
 
 export interface SessionDetail extends Session {
   messages: UserMessage[]
+  last_team_run_id?: string | null
 }

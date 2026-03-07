@@ -173,7 +173,7 @@ class AgentPlan:
 
 ## 3. Sprint 2: CLI 서비스 및 핵심 인프라
 
-> **목표**: Claude CLI 래퍼, Global Execution Lock, 세션 서비스 구현
+> **목표**: Claude CLI 래퍼, 병렬 실행 및 취소 관리, 세션 서비스 구현
 > **기간**: 4일
 > **PRD 참조**: ADR-004, ADR-006, F-001a~F-001c
 
@@ -182,7 +182,7 @@ class AgentPlan:
 | # | 태스크 | 산출물 | 검증 |
 |---|-------|-------|------|
 | 2-1 | CLI 서비스 구현 (Popen + 라인 스트리밍) | `backend/app/services/cli_service.py` | 단위 테스트: CLI 호출 → stdout 라인 콜백 |
-| 2-2 | Global Execution Lock 구현 | `cli_service.py` 내 Lock 래퍼 | 동시 2개 호출 시 순차 실행 확인 |
+| 2-2 | 병렬 실행 추적 및 취소 관리 구현 | `cli_service.py` 내 `_active_procs`, `_cancelled_runs` | 동시 다중 호출 허용 + run_id별 취소 확인 |
 | 2-3 | JSON 파싱 폴백 체인 구현 | `backend/app/services/classification.py` | 정상 JSON / 비정상 JSON / 완전 실패 3가지 케이스 테스트 |
 | 2-4 | 세션 CRUD 서비스 | `backend/app/services/session_service.py` | 생성·조회·목록 단위 테스트 |
 | 2-5 | 설정 관리 (pydantic-settings) | `backend/app/config.py` | `.env` 로드 확인 |
@@ -191,50 +191,60 @@ class AgentPlan:
 
 #### 2-1. CLI 서비스 (`backend/app/services/cli_service.py`)
 
-PRD ADR-004 코드 패턴을 그대로 적용한다.
+PRD ADR-004 코드 패턴을 기반으로 하되, 병렬 실행 요구사항에 맞게 일부 설계를 변경한다.
 
 ```
 핵심 함수:
 ├── _call_claude_sync()      # 동기: Popen + stdout 라인 루프
 ├── call_claude_streaming()  # 비동기: asyncio.to_thread() 래퍼
-├── _cli_lock                # asyncio.Lock (Global Execution Lock)
-└── LineBufferFlusher        # 0.5초 간격 배치 DB 쓰기 (threading.Timer)
-    ├── _lock                # threading.Lock (버퍼 스왑 시 동시성 보호)
-    ├── append(line)         # on_line 콜백에서 호출 (Lock 획득 → 인메모리 추가)
-    ├── flush()              # Lock 획득 → 버퍼 스왑 → 스왑된 데이터를 DB에 UPDATE
-    └── stop()               # Agent 완료 시 잔여 버퍼 flush + 타이머 정지
+├── _active_procs            # set[Popen] — 병렬 실행 중인 프로세스 집합
+├── _cancelled_runs          # set[str] — 취소된 run_id 추적
+└── LineBufferFlusher        # 0.5초 간격 배치 DB 쓰기 (asyncio.Task)
+    ├── _lock                # threading.Lock (append와 flush 간 버퍼 스왑 보호)
+    ├── append(line)         # on_line 콜백에서 호출 (동기, Lock 획득 → 인메모리 추가)
+    ├── flush()              # 비동기: Lock 획득 → 버퍼 스왑 → 비동기 콜백 호출
+    ├── start()              # asyncio.Task로 _run_loop 시작
+    └── stop()               # 비동기: 루프 중단 + 잔여 버퍼 최종 flush
 ```
 
 구현 포인트:
-- `on_line` 콜백은 동기 함수 (스레드에서 실행되므로)
-- **`on_line`은 인메모리 버퍼에만 추가하고, 별도 flush 스레드가 0.5초 간격으로 DB에 배치 기록한다** (배치 쓰기). LLM 출력이 빠르게 다수 라인을 생성하므로, 라인별 DB UPDATE는 Lock 경합 및 I/O 지연을 유발한다. 프론트엔드 폴링 간격(2초)에 비해 0.5초 flush는 충분한 실시간성을 제공한다
-- **`LineBufferFlusher`의 스레드 안전성**: `append()`(Popen stdout 루프 = 생산자)와 `flush()`(Timer 스레드 = 소비자)가 동일 버퍼에 동시 접근하므로, `threading.Lock`으로 보호한 **버퍼 스왑(Swap) 패턴**을 사용한다. `flush()` 시 Lock 획득 → 기존 버퍼를 로컬 변수로 교체 → 빈 리스트로 초기화 → Lock 해제 → 로컬 데이터를 DB에 기록. 이 방식은 Lock 보유 시간을 최소화하여 `append()` 블로킹을 방지한다
-- DB 배치 기록은 동기 `sqlite3`로 별도 connection 사용 (aiosqlite가 아닌)
+- `on_line` 콜백은 동기 함수 (Popen stdout 루프 = 스레드에서 실행되므로)
+- **`on_line`은 인메모리 버퍼에만 추가하고, asyncio Task가 0.5초 간격으로 DB에 배치 기록한다** (배치 쓰기). LLM 출력이 빠르게 다수 라인을 생성하므로, 라인별 DB UPDATE는 Lock 경합 및 I/O 지연을 유발한다. 프론트엔드 폴링 간격(2초)에 비해 0.5초 flush는 충분한 실시간성을 제공한다
+- **`LineBufferFlusher`의 스레드 안전성**: `append()`(Popen stdout 루프 = 생산자)와 `flush()`(asyncio Task = 소비자)가 동일 버퍼에 동시 접근하므로, `threading.Lock`으로 보호한 **버퍼 스왑(Swap) 패턴**을 사용한다. `flush()` 시 Lock 획득 → 기존 버퍼를 로컬 변수로 교체 → 빈 리스트로 초기화 → Lock 해제 → 비동기 콜백으로 DB에 기록. 이 방식은 Lock 보유 시간을 최소화하여 `append()` 블로킹을 방지한다
+- **`flush()` / `stop()`은 `async` 함수, DB 쓰기는 `aiosqlite` 비동기 세션 사용**: 병렬 실행 시 다수의 Sub-Agent가 동시에 DB에 쓰는 상황에서, `threading.Timer` + 동기 `sqlite3`를 사용하면 각 Agent마다 별도 스레드와 별도 connection이 생겨 SQLite WAL 락 경합이 발생한다. `asyncio.Task` 방식은 모든 DB 쓰기가 단일 asyncio 이벤트 루프를 통과하므로 자연스럽게 직렬화되어 락 경합 없이 안전하게 병렬 처리를 지원한다
 - `CLAUDE_CLI_PATH`, `CLAUDE_CLI_TIMEOUT` 환경변수에서 읽기
 - **`subprocess.Popen(..., start_new_session=True)`로 새 프로세스 그룹 생성** → 취소 시 `os.killpg()`로 Claude CLI와 모든 자식 프로세스를 일괄 종료하여 고아(Orphan) 프로세스 방지. 현재 실행 중인 `proc` 객체를 인스턴스에 보관 (상세: Sprint 5 취소 기능)
 
-#### 2-2. Global Execution Lock
+#### 2-2. 병렬 실행 추적 및 취소 관리
+
+초기 설계의 Global Execution Lock(`asyncio.Lock`)은 **병렬 실행을 지원하도록 제거**되었다. 대신 실행 중인 프로세스 집합과 취소 목록으로 관리한다.
 
 ```python
 # cli_service.py
-_cli_lock = asyncio.Lock()
-_current_proc: subprocess.Popen | None = None
+_active_procs: set[subprocess.Popen] = set()   # 동시 실행 중인 프로세스 집합
+_cancelled_runs: set[str] = set()              # 취소 요청된 run_id 목록
 
-async def execute_with_lock(coro):
-    """Lock 획득 후 실행. 대기 중이면 queued 상태."""
-    async with _cli_lock:
-        return await coro
+async def execute_with_lock(coro, run_id: str | None = None):
+    """취소 여부 확인 후 코루틴 실행. 병렬 실행 허용."""
+    if run_id and run_id in _cancelled_runs:
+        raise RuntimeError(f"Run {run_id} was cancelled")
+    return await coro
 
-async def cancel_current():
-    """현재 실행 중인 CLI 프로세스 + 자식 프로세스 전체 종료."""
-    if _current_proc and _current_proc.poll() is None:
-        import os, signal
-        try:
-            # 프로세스 그룹 전체 종료 (고아 프로세스 방지)
-            os.killpg(os.getpgid(_current_proc.pid), signal.SIGTERM)
-        except ProcessLookupError:
-            pass
+async def cancel_current(run_id: str | None = None):
+    """run_id를 취소 목록에 등록 + 실행 중인 모든 프로세스 종료."""
+    if run_id:
+        _cancelled_runs.add(run_id)
+    for proc in list(_active_procs):
+        if proc.poll() is None:
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+            except (ProcessLookupError, OSError):
+                pass
 ```
+
+> **설계 변경 이유**: 초기에는 단일 사용자 환경을 가정하여 순차 실행 Lock을 설계하였으나, Team 모드에서 다수의 Sub-Agent를 동시에 실행해야 하는 요구사항으로 인해 병렬 실행 모델로 전환하였다. `_cancelled_runs`를 통한 run_id 추적으로 개별 실행 취소가 가능하며, `_active_procs`로 실행 중인 모든 프로세스를 일괄 종료할 수 있다.
+>
+> 이 변경은 `LineBufferFlusher` 설계에도 연쇄적으로 영향을 주었다. 병렬 Sub-Agent가 동시에 DB에 쓰는 상황에서 기존의 `threading.Timer` + 동기 `sqlite3` 방식은 Agent마다 별도 스레드와 별도 connection을 생성하여 SQLite WAL 락 경합을 유발한다. 따라서 `flush()` / `stop()`을 `async`로 전환하고 `aiosqlite`를 사용함으로써, 모든 DB 쓰기를 단일 asyncio 이벤트 루프에서 직렬 처리하여 락 경합 없이 병렬 Agent를 안전하게 지원한다.
 
 #### 2-3. JSON 파싱 폴백 체인 (`backend/app/services/classification.py`)
 
@@ -262,7 +272,7 @@ parse_classification(raw_output: str) -> ClassificationResult:
 
 - [ ] `pytest tests/test_cli_service.py` → CLI mock 테스트 통과
 - [ ] `pytest tests/test_classification.py` → 4가지 폴백 시나리오 통과
-- [ ] Global Lock: 2개 동시 호출 시 첫 번째 완료 후 두 번째 실행 확인
+- [ ] 병렬 실행: 동시 다중 CLI 호출이 허용되며 각각 독립적으로 실행됨 확인
 - [ ] LineBufferFlusher: 다수 스레드에서 동시 append + flush 시 데이터 누락 없음 확인
 - [ ] 세션 CRUD: 생성 → 목록 → 상세 조회 테스트 통과
 
@@ -558,7 +568,7 @@ Context Assembler 세부 로직 (PRD ADR-006 준수):
 ```python
 CONTEXT_CHAR_LIMIT = 3000  # 개별 Agent 결과의 임계치
 
-async def _assemble_context(self, results: dict[str, str]) -> str | None:
+async def _assemble_context(self, results: dict[str, str], run_id: str | None = None) -> str | None:
     if not results:
         return None
 
@@ -566,22 +576,25 @@ async def _assemble_context(self, results: dict[str, str]) -> str | None:
     for agent_name, result in results.items():
         if len(result) > CONTEXT_CHAR_LIMIT:
             # PRD ADR-006: 컨텍스트 초과 시 별도 CLI 호출로 요약
-            result = await self._summarize_for_context(agent_name, result)
+            result = await self._summarize_for_context(agent_name, result, run_id=run_id)
         parts.append(f"[{agent_name} 결과]:\n{result}")
 
     return "\n\n".join(parts)
 
-async def _summarize_for_context(self, agent_name: str, content: str) -> str:
+async def _summarize_for_context(self, agent_name: str, content: str, run_id: str | None = None) -> str:
     """긴 결과물을 다음 Agent에 전달할 수 있도록 CLI 호출로 요약."""
     return await call_claude_streaming(
         system_prompt="이전 Agent의 작업 결과를 다음 Agent가 참고할 수 있도록 핵심 내용만 간결하게 요약하세요. "
                       "코드가 포함된 경우 핵심 로직과 주요 함수 시그니처를 보존하세요.",
         user_message=f"다음은 {agent_name}의 작업 결과입니다. 요약해주세요:\n\n{content}",
-        on_line=lambda _: None,  # 요약은 중간 출력 불필요
+        on_line=None,  # 요약은 중간 출력 불필요
+        run_id=run_id,  # 취소 신호 전달: 사용자가 취소 시 요약 CLI 호출도 즉시 중단
     )
 ```
 
 > **주의**: 요약 CLI 호출은 추가 비용(시간)이 발생한다. 비용 표시(PRD 비기능 요구사항)에서 실시간으로 호출 수를 갱신해야 한다. 단순 Truncation은 코드 결과에서 중간이 잘려 다음 Agent가 치명적 문맥 상실을 겪을 수 있으므로, PRD 명세대로 요약 호출을 사용한다.
+>
+> **`run_id` 추가 이유**: 취소 기능(태스크 5-7)과 연동하기 위함이다. `run_id`를 CLI 호출 체인 끝까지 전달하면 `_call_claude_sync()` 내부에서 `_cancelled_runs`를 확인하여 요약 단계에서도 즉시 중단할 수 있다. 없으면 사용자가 취소를 요청해도 요약 CLI 호출이 완료될 때까지 취소가 지연된다.
 
 #### 5-7. 취소 기능
 
@@ -807,9 +820,9 @@ def mock_claude_cli(monkeypatch):
 | R1 | Claude CLI 응답 지연 (120초 초과) | 높음 | 타임아웃 자동 종료 + 사용자 알림. 환경변수로 타임아웃 조정 가능 |
 | R2 | CLI JSON 출력 불안정 (hallucination) | 높음 | F-001a~c 3단계 폴백 체인으로 100% 처리. Solo 폴백이 최종 안전망 |
 | R3 | Popen stdout 버퍼링으로 실시간성 저하 | 중간 | `bufsize=1` (라인 버퍼링) 설정. `PYTHONUNBUFFERED=1` 환경변수 |
-| R4 | 동시 요청 시 Lock 대기 시간 증가 | 중간 | 프론트엔드에서 `queued` 상태 표시. 단일 사용자 macOS 앱이므로 빈도 낮음 |
+| R4 | 병렬 실행 시 DB 쓰기 경합 증가 | 중간 | WAL 모드 + LineBufferFlusher 0.5초 배치 쓰기로 DB 접근 빈도 최소화. aiosqlite 비동기 세션으로 단일 이벤트 루프에서 처리 |
 | R5 | Context Assembler 컨텍스트 크기 초과 | 중간 | 3000자 임계치 초과 시 별도 CLI 호출로 요약 후 주입 (PRD ADR-006). 요약 호출로 인한 추가 지연(~10초)은 비용 표시에서 실시간 반영 |
-| R6 | aiosqlite와 동기 sqlite3 혼용 시 DB 충돌 | 중간 | WAL 모드 + busy_timeout으로 완화. on_line은 0.5초 배치 쓰기로 DB 접근 빈도 대폭 감소. 별도 connection 사용 |
+| R6 | 병렬 Sub-Agent 실행 중 취소 시 일부 고아 프로세스 발생 가능 | 중간 | `_active_procs` 집합으로 모든 실행 프로세스 추적. `cancel_current()`에서 `os.killpg()`로 일괄 종료. `_cancelled_runs`로 신규 실행 차단 |
 | R7 | Claude CLI 구독 요금제 변경/제한 | 낮음 | .env에서 CLI 경로 변경 가능. SDK 전환은 cli_service.py 인터페이스만 교체 |
 
 ---

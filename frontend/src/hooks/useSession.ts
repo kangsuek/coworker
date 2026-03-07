@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { api } from '../lib/api'
-import type { Session, UserMessage } from '../types/api'
+import type { Session, SessionDetail, UserMessage } from '../types/api'
 
 export interface UseSessionResult {
   sessions: Session[]
   currentSession: Session | null
   messages: UserMessage[]
-  switchSession: (id: string) => Promise<void>
+  switchSession: (id: string) => Promise<SessionDetail>
   createSession: () => Promise<void>
   deleteSession: (id: string) => Promise<void>
   addMessage: (msg: UserMessage) => void
@@ -34,6 +34,7 @@ export function useSession(): UseSessionResult {
     const detail = await api.getSession(id)
     setCurrentSession(detail)
     setMessages(detail.messages)
+    return detail
   }, [])
 
   const createSession = useCallback(async () => {

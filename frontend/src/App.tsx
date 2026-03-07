@@ -1,12 +1,14 @@
-import { useEffect, useState, useCallback } from 'react'
-import { Menu, ChevronDown, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
+import { useCallback, useEffect, useState } from 'react'
+import { ChevronDown, Menu, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 
 import AgentChannel from './components/AgentChannel'
 import ErrorBoundary from './components/ErrorBoundary'
 import SessionList from './components/SessionList'
 import UserChannel from './components/UserChannel'
-import { useAgentPolling } from './hooks/useAgentPolling'
+import { useRunSSE } from './hooks/useRunSSE'
 import { useSession } from './hooks/useSession'
+import { api } from './lib/api'
+import type { AgentMessage } from './types/api'
 
 const THEME_KEY = 'coworker_theme'
 
@@ -48,6 +50,8 @@ function App() {
   
   const [currentMode, setCurrentMode] = useState<'solo' | 'team' | null>(null)
   const [currentRunId, setCurrentRunId] = useState<string | null>(null)
+  const [historicalRunId, setHistoricalRunId] = useState<string | null>(null)
+  const [historicalAgentMessages, setHistoricalAgentMessages] = useState<AgentMessage[]>([])
   const session = useSession()
 
   const [llmProvider, setLlmProvider] = useState('claude-cli')
@@ -73,34 +77,108 @@ function App() {
     setTheme((prev) => (prev === 'light' ? 'dark' : 'light'))
   }, [])
 
-  const { messages: agentMessages, isPolling: isAgentPolling } = useAgentPolling(
-    currentRunId,
-    currentMode,
-    true,
-  )
+  const {
+    runStatus: currentRunStatus,
+    agentMessages,
+    isConnected: isSSEConnected,
+  } = useRunSSE(currentRunId, {
+    onDone: (response, mode, model, timing) => {
+      if (mode === 'team' && currentRunId) {
+        const runId = currentRunId
+        setHistoricalRunId(runId)
+        api.getAgentMessages(runId)
+          .then(({ messages }) => setHistoricalAgentMessages(messages))
+          .catch(() => {})
+      }
+      session.addMessage({
+        id: crypto.randomUUID(),
+        role: 'reader',
+        content: response,
+        mode,
+        model,
+        timing,
+        created_at: new Date().toISOString(),
+      })
+      setCurrentMode(mode)
+      setCurrentRunId(null)
+    },
+    onError: (errorResponse) => {
+      session.addMessage({
+        id: crypto.randomUUID(),
+        role: 'reader',
+        content: errorResponse || '오류가 발생했습니다. 다시 시도해주세요.',
+        mode: null,
+        created_at: new Date().toISOString(),
+      })
+      setCurrentRunId(null)
+    },
+    onCancelled: () => {
+      const doneCount = agentMessages.filter((m) => m.status === 'done').length
+      if (currentMode === 'team' && agentMessages.length > 0) {
+        if (currentRunId) {
+          const runId = currentRunId
+          setHistoricalRunId(runId)
+          api.getAgentMessages(runId)
+            .then(({ messages }) => setHistoricalAgentMessages(messages))
+            .catch(() => {})
+        }
+        session.addMessage({
+          id: crypto.randomUUID(),
+          role: 'reader',
+          content: `${agentMessages.length}개 중 ${doneCount}개 Agent 완료 후 취소되었습니다.`,
+          mode: 'team',
+          created_at: new Date().toISOString(),
+        })
+      }
+      setCurrentRunId(null)
+    },
+  })
 
   const handleSessionCreated = (sessionId: string) => {
     session.setCurrentSessionFromChat(sessionId)
     setTimeout(() => session.refreshSessions(), 1500)
   }
 
-  const handleSwitchSession = (id: string) => {
+  const handleSwitchSession = async (id: string) => {
     setCurrentRunId(null)
     setCurrentMode(null)
-    session.switchSession(id)
+    setHistoricalRunId(null)
+    setHistoricalAgentMessages([])
+    const detail = await session.switchSession(id)
+    // 마지막 팀 모드 실행의 에이전트 메시지 복원
+    const lastTeamMsg = detail.messages.slice().reverse().find(
+      (m) => m.role === 'reader' && m.mode === 'team' && m.run_id,
+    )
+    if (lastTeamMsg?.run_id) {
+      setHistoricalRunId(lastTeamMsg.run_id)
+      api.getAgentMessages(lastTeamMsg.run_id)
+        .then(({ messages }) => setHistoricalAgentMessages(messages))
+        .catch(() => {})
+    }
   }
 
   const handleCreateSession = () => {
     setCurrentRunId(null)
     setCurrentMode(null)
+    setHistoricalRunId(null)
+    setHistoricalAgentMessages([])
     session.createSession()
   }
 
   const handleDeleteSession = (id: string) => {
     setCurrentRunId(null)
     setCurrentMode(null)
+    setHistoricalRunId(null)
+    setHistoricalAgentMessages([])
     session.deleteSession(id)
   }
+
+
+  // AgentChannel 표시용: 실행 중이면 라이브, 아니면 히스토리
+  const displayedAgentMessages = currentRunId !== null ? agentMessages : historicalAgentMessages
+  const displayedMode = currentRunId !== null
+    ? currentMode
+    : historicalAgentMessages.length > 0 ? 'team' : currentMode
 
   const isDarkMode = theme === 'dark'
 
@@ -203,6 +281,7 @@ function App() {
           currentSession={session.currentSession}
           messages={session.messages}
           runId={currentRunId}
+          runStatus={currentRunStatus}
           llmProvider={llmProvider}
           llmModel={llmModel}
           onMessageAdded={session.addMessage}
@@ -223,9 +302,9 @@ function App() {
       `}>
         <ErrorBoundary fallbackLabel="Agent Channel">
           <AgentChannel
-            mode={currentMode}
-            messages={agentMessages}
-            isPolling={isAgentPolling}
+            mode={displayedMode}
+            messages={displayedAgentMessages}
+            isPolling={isSSEConnected}
             isRunActive={currentRunId !== null}
             onCloseMobile={() => setIsAgentPanelOpen(false)}
           />

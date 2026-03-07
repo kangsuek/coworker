@@ -81,7 +81,7 @@ async def test_team_execute_runs_agents_sequentially(db):
         user_status_message=None,
     )
 
-    async def fake_execute(task, context, on_line, model=""):
+    async def fake_execute(task, context, on_line, model="", **kwargs):
         call_order.append(task)
         return f"{task} 결과"
 
@@ -229,7 +229,7 @@ async def test_team_execute_parallel_performance(db):
         ],
     )
 
-    async def slow_execute(task, context, on_line, model=""):
+    async def slow_execute(task, context, on_line, model="", **kwargs):
         await asyncio.sleep(0.2)  # 0.2초 대기
         return f"{task} 완료"
 
@@ -322,7 +322,7 @@ async def test_team_execute_includes_history_in_context(db):
 
     captured_contexts: list[str] = []
 
-    async def fake_execute(task, context, on_line, model=""):
+    async def fake_execute(task, context, on_line, model="", **kwargs):
         if context:
             captured_contexts.append(context)
         return "결과"

@@ -134,6 +134,14 @@ async def update_run_status(
     except Exception:
         pass
 
+    # 종료 상태 도달 시 취소 목록에서 정리 (메모리 누수 방지)
+    if status in ("done", "error", "cancelled"):
+        try:
+            from app.services.cli_service import _cancelled_runs
+            _cancelled_runs.discard(run_id)
+        except Exception:
+            pass
+
     return run
 
 

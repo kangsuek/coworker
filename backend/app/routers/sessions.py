@@ -3,7 +3,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import Run, get_db
-from app.models.schemas import SessionDetail, SessionOut, UserMessageOut
+from app.models.schemas import SessionDetail, SessionOut, TimingInfo, UserMessageOut
 from app.services import session_service
 from app.services.cli_service import cancel_current
 
@@ -74,6 +74,64 @@ async def get_session(session_id: str, db: AsyncSession = Depends(get_db)):
     session = await session_service.get_session_with_messages(db, session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
+
+    # user_message_id → run 정보 매핑 (run_id, timing 포함)
+    runs_result = await db.execute(
+        select(
+            Run.id,
+            Run.user_message_id,
+            Run.started_at,
+            Run.thinking_started_at,
+            Run.cli_started_at,
+            Run.finished_at,
+        ).where(Run.session_id == session_id)
+    )
+    run_map: dict[str, dict] = {
+        row.user_message_id: {
+            "id": row.id,
+            "timing": TimingInfo(
+                queued_at=row.started_at,
+                thinking_started_at=row.thinking_started_at,
+                cli_started_at=row.cli_started_at,
+                finished_at=row.finished_at,
+            ) if row.finished_at else None,
+        }
+        for row in runs_result
+    }
+
+    # 메시지를 시간순 정렬
+    sorted_msgs = sorted(session.user_messages, key=lambda m: m.created_at)
+    session_model = session.llm_model  # 세션에 설정된 모델명
+
+    last_team_run_id: str | None = None
+    result_messages: list[UserMessageOut] = []
+    for i, m in enumerate(sorted_msgs):
+        run_id: str | None = None
+        timing: TimingInfo | None = None
+        if m.role == "reader" and m.mode == "team":
+            # 직전 user 메시지의 run_id를 연결
+            for j in range(i - 1, -1, -1):
+                if sorted_msgs[j].role == "user":
+                    run_info = run_map.get(sorted_msgs[j].id)
+                    if run_info:
+                        run_id = run_info["id"]
+                        timing = run_info["timing"]
+                    break
+            if run_id:
+                last_team_run_id = run_id
+        result_messages.append(
+            UserMessageOut(
+                id=m.id,
+                role=m.role,
+                content=m.content,
+                mode=m.mode,
+                run_id=run_id,
+                model=session_model if run_id else None,
+                timing=timing,
+                created_at=m.created_at,
+            )
+        )
+
     return SessionDetail(
         id=session.id,
         title=session.title,
@@ -81,14 +139,6 @@ async def get_session(session_id: str, db: AsyncSession = Depends(get_db)):
         llm_model=session.llm_model,
         created_at=session.created_at,
         updated_at=session.updated_at,
-        messages=[
-            UserMessageOut(
-                id=m.id,
-                role=m.role,
-                content=m.content,
-                mode=m.mode,
-                created_at=m.created_at,
-            )
-            for m in session.user_messages
-        ],
+        messages=result_messages,
+        last_team_run_id=last_team_run_id,
     )

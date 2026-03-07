@@ -14,6 +14,7 @@ from pydantic import ValidationError
 from app.config import settings
 from app.models.schemas import AgentPlan, ClassificationResult, LLMClassificationResponse
 from app.services.llm import get_provider
+from app.services.llm.base import LLMProvider
 
 # ── 규칙 기반 분류 ──────────────────────────────────────────────────────────
 
@@ -29,10 +30,13 @@ def _role_for_task(task: str) -> str:
     return "Researcher"
 
 
-async def _classify_with_llm(user_message: str, current_agents: list[AgentPlan]) -> list[AgentPlan]:
+async def _classify_with_llm(
+    user_message: str,
+    current_agents: list[AgentPlan],
+    provider: LLMProvider,
+    model: str = "",
+) -> list[AgentPlan]:
     """LLM을 사용하여 태스크의 역할과 의존성을 정교화합니다."""
-    # LLM 프로바이더 획득 (기본값: gemini-cli)
-    provider = get_provider("gemini-cli")
 
     # 가용한 역할 목록 및 설명
     role_info = "\n".join([f"- {role}: {keywords}" for role, keywords in [
@@ -62,10 +66,11 @@ async def _classify_with_llm(user_message: str, current_agents: list[AgentPlan])
     user_prompt = f"사용자 메시지: {user_message}\n태스크 목록:\n{tasks_str}"
 
     try:
-        # LLM 호출
+        # LLM 호출 (경량 분류 전용 모델 사용)
         raw_response = await provider.stream_generate(
             system_prompt=system_prompt,
             user_message=user_prompt,
+            model=model,
         )
 
         # JSON 추출 및 파싱
@@ -98,7 +103,11 @@ async def _classify_with_llm(user_message: str, current_agents: list[AgentPlan])
     return current_agents
 
 
-async def classify_message(user_message: str) -> ClassificationResult:
+async def classify_message(
+    user_message: str,
+    llm_provider: LLMProvider | None = None,
+    classify_model: str = "",
+) -> ClassificationResult:
     """Solo/Team 분류 및 지능형 태스크 분석.
 
     1. 규칙 기반으로 Solo/Team 결정 및 1차 태스크 분할.
@@ -134,8 +143,9 @@ async def classify_message(user_message: str) -> ClassificationResult:
         )
 
     # 2단계: LLM을 통한 역할 및 의존성 강화
+    provider = llm_provider or get_provider("gemini-cli")
     try:
-        enhanced_agents = await _classify_with_llm(user_message, agents)
+        enhanced_agents = await _classify_with_llm(user_message, agents, provider, classify_model)
         agents = enhanced_agents
     except Exception:
         # LLM 실패 시 1차 구성(규칙 기반) 유지 (Fallback)

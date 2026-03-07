@@ -21,7 +21,7 @@ from app.config import settings
 from app.models import db as models
 from app.models.schemas import AgentPlan, ClassificationResult
 from app.services.classification import classify_message
-from app.services.cli_service import LineBufferFlusher
+from app.services.cli_service import LineBufferFlusher, cancel_current
 from app.services.llm import get_provider
 from app.services.session_service import (
     create_agent_message,
@@ -109,6 +109,7 @@ class ReaderAgent:
             session = await self.db.get(models.Session, session_id)
             provider_name = session.llm_provider if session and session.llm_provider else "claude-cli"
             self.llm_provider = get_provider(provider_name)
+            self.provider_name = provider_name
             self.session_model = session.llm_model if session else None
 
             async with self.db_lock:
@@ -185,14 +186,29 @@ class ReaderAgent:
                     self.db, run_id, "error", response=error_msg, finished_at=datetime.now(UTC)
                 )
 
-    async def _classify(self, user_message: str) -> ClassificationResult:
-        """Solo/Team 분류: 규칙 기반 판정만 사용 (CLI 호출 없음).
+    # 프로바이더별 분류 전용 경량 모델 (Claude: Haiku, Gemini: Flash)
+    _CLASSIFY_MODEL: dict[str, str] = {
+        "claude-cli": settings.solo_model,        # Haiku (solo_model 설정값)
+        "gemini-cli": "gemini-3-flash-preview",   # Gemini3 Flash
+    }
 
-        2차 CLI 판정을 제거해 분류 지연(3~15초)과 _cli_lock 선점 문제를 해소한다.
-        Team 트리거는 TEAM_TRIGGER_KEYWORDS 환경변수로 코드 수정 없이 확장 가능.
+    async def _classify(self, user_message: str) -> ClassificationResult:
+        """Solo/Team 분류.
+
+        규칙 기반으로 1차 판정 후, Team 모드일 경우 경량 LLM(Haiku/Flash)으로
+        역할(Role) 및 의존성(depends_on)을 정교화한다.
+        사용자가 선택한 프로바이더를 그대로 사용하여 불필요한 cold start를 방지한다.
         """
-        result = await classify_message(user_message)
-        logger.info("_classify (rule-based): mode=%s agents=%s", result.mode, result.agents)
+        classify_model = self._CLASSIFY_MODEL.get(self.provider_name, settings.solo_model)
+        result = await classify_message(
+            user_message,
+            llm_provider=self.llm_provider,
+            classify_model=classify_model,
+        )
+        logger.info(
+            "_classify: mode=%s agents=%s provider=%s model=%s",
+            result.mode, result.agents, self.provider_name, classify_model,
+        )
         return result
 
     async def _solo_respond(
@@ -371,8 +387,15 @@ class ReaderAgent:
             )
 
     def _create_agent(self, agent_plan: AgentPlan, index: int) -> SubAgent:
-        """AgentPlan → SubAgent 생성."""
-        system_prompt = _PRESET_MAP.get(agent_plan.role, _PRESET_MAP["Researcher"])
+        """AgentPlan → SubAgent 생성.
+
+        Gemini CLI는 Google Search가 기본 활성화되어 있으므로
+        Researcher에 웹 검색 활용 지침을 적용한다.
+        """
+        if agent_plan.role == "Researcher" and self.provider_name == "gemini-cli":
+            system_prompt = researcher.SYSTEM_PROMPT_WEB_SEARCH + _AGENT_COMMON_INSTRUCTION
+        else:
+            system_prompt = _PRESET_MAP.get(agent_plan.role, _PRESET_MAP["Researcher"])
         return SubAgent(
             name=f"{agent_plan.role}-{index + 1}",
             role_preset=agent_plan.role,

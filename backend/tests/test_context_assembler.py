@@ -39,7 +39,7 @@ async def test_assemble_long_result_triggers_summary(db):
         mock_summary.return_value = "요약된 결과"
         context = await agent._assemble_context(results)
 
-    mock_summary.assert_called_once_with("Coder-A", long_result)
+    mock_summary.assert_called_once_with("Coder-A", long_result, run_id=None)
     assert "요약된 결과" in context
 
 
@@ -90,5 +90,5 @@ async def test_assemble_exactly_3001_chars(db):
     with patch.object(agent, "_summarize_for_context", new_callable=AsyncMock) as mock_s:
         mock_s.return_value = "요약"
         context = await agent._assemble_context(results)
-    mock_s.assert_called_once_with("Agent-A", long_result)
+    mock_s.assert_called_once_with("Agent-A", long_result, run_id=None)
     assert "요약" in context

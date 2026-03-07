@@ -104,31 +104,37 @@ async def test_call_claude_streaming_async(mock_popen):
 # ---------------------------------------------------------------------------
 
 
-def test_line_buffer_flusher_append_and_flush():
-    """버퍼 추가 + 수동 flush → flush_callback에 전달."""
+@pytest.mark.asyncio
+async def test_line_buffer_flusher_append_and_flush():
+    """버퍼 추가 + 수동 flush → flush_callback에 전달 (async API)."""
     flushed_lines: list[str] = []
+
+    async def async_callback(lines: list[str]) -> None:
+        flushed_lines.extend(lines)
+
     flusher = LineBufferFlusher(
-        flush_callback=lambda lines: flushed_lines.extend(lines),
+        flush_callback=async_callback,
         flush_interval=10.0,  # 자동 flush 방지 (수동 테스트)
     )
     flusher.append("line-a")
     flusher.append("line-b")
-    flusher.flush()
+    await flusher.flush()
 
     assert flushed_lines == ["line-a", "line-b"]
 
 
-def test_line_buffer_flusher_thread_safety():
-    """5 threads x 100 lines = 500 lines, flush 후 데이터 무결성 확인."""
+@pytest.mark.asyncio
+async def test_line_buffer_flusher_thread_safety():
+    """5 threads x 100 lines = 500 lines, stop 후 데이터 무결성 확인 (async API)."""
     flushed_lines: list[str] = []
     lock = threading.Lock()
 
-    def safe_extend(lines):
+    async def async_callback(lines: list[str]) -> None:
         with lock:
             flushed_lines.extend(lines)
 
     flusher = LineBufferFlusher(
-        flush_callback=safe_extend,
+        flush_callback=async_callback,
         flush_interval=0.05,
     )
     flusher.start()
@@ -143,21 +149,26 @@ def test_line_buffer_flusher_thread_safety():
     for t in threads:
         t.join()
 
-    flusher.stop()
+    await flusher.stop()
     assert len(flushed_lines) == 500
 
 
-def test_line_buffer_flusher_stop_flushes_remaining():
-    """stop 호출 시 버퍼에 남은 데이터가 모두 flush되는지 확인."""
+@pytest.mark.asyncio
+async def test_line_buffer_flusher_stop_flushes_remaining():
+    """stop 호출 시 버퍼에 남은 데이터가 모두 flush되는지 확인 (async API)."""
     flushed_lines: list[str] = []
+
+    async def async_callback(lines: list[str]) -> None:
+        flushed_lines.extend(lines)
+
     flusher = LineBufferFlusher(
-        flush_callback=lambda lines: flushed_lines.extend(lines),
+        flush_callback=async_callback,
         flush_interval=10.0,  # 자동 flush 방지
     )
     flusher.append("remaining-1")
     flusher.append("remaining-2")
 
-    flusher.stop()
+    await flusher.stop()
     assert flushed_lines == ["remaining-1", "remaining-2"]
 
 
@@ -167,19 +178,13 @@ def test_line_buffer_flusher_stop_flushes_remaining():
 
 
 @pytest.mark.asyncio
-async def test_global_lock_sequential_execution():
-    """동시 2개 execute_with_lock 호출 시 순차 실행 확인."""
-    events: list[str] = []
-
+async def test_execute_with_lock_parallel_execution():
+    """execute_with_lock은 락 없이 병렬 실행 허용 — 두 태스크 모두 정상 완료 확인."""
     async def task_a():
-        events.append("a_start")
-        await asyncio.sleep(0.1)
-        events.append("a_end")
+        await asyncio.sleep(0.05)
         return "result_a"
 
     async def task_b():
-        events.append("b_start")
-        events.append("b_end")
         return "result_b"
 
     result_a, result_b = await asyncio.gather(
@@ -189,7 +194,6 @@ async def test_global_lock_sequential_execution():
 
     assert result_a == "result_a"
     assert result_b == "result_b"
-    assert events.index("a_end") < events.index("b_start")
 
 
 @pytest.mark.asyncio

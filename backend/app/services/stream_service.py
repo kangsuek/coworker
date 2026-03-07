@@ -10,36 +10,55 @@ logger = logging.getLogger(__name__)
 class StreamManager:
     def __init__(self):
         self.queues: dict[str, list[asyncio.Queue]] = {}
-        # 각 run_id의 마지막 이벤트를 저장 (늦은 구독자 대응)
-        self.last_events: dict[str, str] = {}
+        # run_id별 캐시: status 이벤트 + agent 생성/내용 이벤트 (늦은 구독자 재전송용)
+        self.last_status: dict[str, str] = {}          # run_id → 마지막 status 이벤트 JSON
+        self.agent_created: dict[str, list[str]] = {}  # run_id → agent_message_created 이벤트 목록
+        self.last_content: dict[str, str] = {}         # "{run_id}:{agent}" → 마지막 content 이벤트 JSON
         self.lock = asyncio.Lock()
 
     async def subscribe(self, run_id: str) -> asyncio.Queue:
-        """특정 run_id의 실시간 업데이트를 수신할 큐를 생성하여 반환."""
+        """특정 run_id의 실시간 업데이트를 수신할 큐를 생성하여 반환.
+
+        늦은 구독자(재연결 클라이언트)를 위해 캐시된 이벤트를 즉시 전송:
+        1. agent_message_created 이벤트 (에이전트 목록 복원)
+        2. 각 에이전트의 마지막 content 이벤트 (진행 중 내용 복원)
+        3. 마지막 status 이벤트 (현재 실행 상태 복원)
+        """
         queue = asyncio.Queue()
         async with self.lock:
             if run_id not in self.queues:
                 self.queues[run_id] = []
             self.queues[run_id].append(queue)
-            
-            # 마지막 이벤트를 즉시 전송 (있을 경우)
-            if run_id in self.last_events:
-                await queue.put(self.last_events[run_id])
-                
+
+            # 에이전트 생성 이벤트 재전송 (순서 보장)
+            for event_json in self.agent_created.get(run_id, []):
+                await queue.put(event_json)
+            # 에이전트별 마지막 content 재전송
+            for key, event_json in self.last_content.items():
+                if key.startswith(f"{run_id}:"):
+                    await queue.put(event_json)
+            # 마지막 status 재전송
+            if run_id in self.last_status:
+                await queue.put(self.last_status[run_id])
+
         logger.debug("Subscribed to stream: run_id=%s, queue_id=%s", run_id, id(queue))
         return queue
 
     async def unsubscribe(self, run_id: str, queue: asyncio.Queue):
-        """구독 취소."""
+        """구독 취소. 구독자가 0명이 되면 캐시 정리."""
         async with self.lock:
             if run_id in self.queues:
                 if queue in self.queues[run_id]:
                     self.queues[run_id].remove(queue)
                 if not self.queues[run_id]:
                     del self.queues[run_id]
-                    # 구독자가 없어도 last_events는 일정 시간 유지할 수 있으나 여기서는 일단 함께 삭제
-                    if run_id in self.last_events:
-                        del self.last_events[run_id]
+                    # 구독자가 모두 떠나면 캐시 정리
+                    self.last_status.pop(run_id, None)
+                    self.agent_created.pop(run_id, None)
+                    # content 캐시 중 해당 run_id 항목 정리
+                    keys_to_del = [k for k in self.last_content if k.startswith(f"{run_id}:")]
+                    for k in keys_to_del:
+                        del self.last_content[k]
         logger.debug("Unsubscribed from stream: run_id=%s, queue_id=%s", run_id, id(queue))
 
     async def broadcast(self, run_id: str, data: Any):
@@ -48,11 +67,19 @@ class StreamManager:
         async with self.lock:
             # JSON 직렬화
             json_data = json.dumps(data, ensure_ascii=False)
-            
-            # 마지막 이벤트 업데이트 (type이 status인 경우 우선적으로 캐싱)
-            if data.get("type") == "status":
-                self.last_events[run_id] = json_data
+
+            # 이벤트 타입별 캐싱 (늦은 구독자 재전송용)
+            event_type = data.get("type")
+            if event_type == "status":
+                self.last_status[run_id] = json_data
                 logger.debug("Cached last status for run_id=%s: %s", run_id, data.get("status"))
+            elif event_type == "agent_message_created":
+                if run_id not in self.agent_created:
+                    self.agent_created[run_id] = []
+                self.agent_created[run_id].append(json_data)
+            elif event_type == "content":
+                agent = data.get("agent", "")
+                self.last_content[f"{run_id}:{agent}"] = json_data
 
             if run_id in self.queues:
                 # 큐 목록 복사 (락 범위 축소)
@@ -66,15 +93,6 @@ class StreamManager:
         for queue in queues_to_send:
             await queue.put(json_data)
 
-    def broadcast_sync(self, run_id: str, data: Any):
-        """동기 컨텍스트(예: 스레드)에서 브로드캐스트 호출."""
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                loop.call_soon_threadsafe(
-                    lambda: asyncio.create_task(self.broadcast(run_id, data))
-                )
-        except RuntimeError:
-            pass
+        # broadcast_sync 제거됨 (dead code + deprecated asyncio.get_event_loop 사용)
 
 stream_manager = StreamManager()

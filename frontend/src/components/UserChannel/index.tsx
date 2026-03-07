@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { Plus, X } from 'lucide-react'
 
-import { useRunPolling } from '../../hooks/useRunPolling'
 import { api } from '../../lib/api'
-import type { AgentMessage, Session, UserMessage } from '../../types/api'
+import type { AgentMessage, RunStatus, Session, UserMessage } from '../../types/api'
 import MessageBubble from './MessageBubble'
 import StatusBadge from './StatusBadge'
 
@@ -11,6 +10,7 @@ interface Props {
   currentSession: Session | null
   messages: UserMessage[]
   runId: string | null
+  runStatus: RunStatus
   llmProvider?: string
   llmModel?: string
   onMessageAdded: (msg: UserMessage) => void
@@ -24,6 +24,7 @@ export default function UserChannel({
   currentSession,
   messages,
   runId,
+  runStatus,
   llmProvider = 'claude-cli',
   llmModel = '',
   onMessageAdded,
@@ -36,60 +37,13 @@ export default function UserChannel({
   const [submitting, setSubmitting] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const onMessageAddedRef = useRef(onMessageAdded)
   const onModeChangeRef = useRef(onModeChange)
-  const onRunChangeRef = useRef(onRunChange)
-  const agentMessagesRef = useRef(agentMessages)
 
   useEffect(() => {
-    onMessageAddedRef.current = onMessageAdded
     onModeChangeRef.current = onModeChange
-    onRunChangeRef.current = onRunChange
-    agentMessagesRef.current = agentMessages
   })
 
-  const runStatus = useRunPolling(runId, {
-    onDone: (response, mode, model, timing) => {
-      onMessageAddedRef.current({
-        id: crypto.randomUUID(),
-        role: 'reader',
-        content: response,
-        mode,
-        model,
-        timing,
-        created_at: new Date().toISOString(),
-      })
-      onModeChangeRef.current(mode)
-      onRunChangeRef.current(null)
-    },
-    onError: (errorResponse) => {
-      onMessageAddedRef.current({
-        id: crypto.randomUUID(),
-        role: 'reader',
-        content: errorResponse || '오류가 발생했습니다. 다시 시도해주세요.',
-        mode: null,
-        created_at: new Date().toISOString(),
-      })
-      onRunChangeRef.current(null)
-    },
-    onCancelled: () => {
-      const msgs = agentMessagesRef.current ?? []
-      const mode = runStatus.mode
-      if (mode === 'team' && msgs.length > 0) {
-        const doneCount = msgs.filter((m) => m.status === 'done').length
-        onMessageAddedRef.current({
-          id: crypto.randomUUID(),
-          role: 'reader',
-          content: `${msgs.length}개 중 ${doneCount}개 Agent 완료 후 취소되었습니다.`,
-          mode: 'team',
-          created_at: new Date().toISOString(),
-        })
-      }
-      onRunChangeRef.current(null)
-    },
-  })
-
-  // 폴링 중 mode 감지 시 즉시 알림 (Agent Channel 폴링 활성화용)
+  // mode 감지 시 즉시 알림 (Agent Channel SSE 활성화용)
   useEffect(() => {
     if (runStatus.mode) {
       onModeChangeRef.current(runStatus.mode)
