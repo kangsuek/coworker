@@ -1,6 +1,5 @@
 """Coder 프리셋 시스템 프롬프트."""
 
-SYSTEM_PROMPT = (
-    "당신은 시니어 소프트웨어 엔지니어입니다. "
-    "클린 코드를 작성하고, 에러 처리를 포함하며, 코드에 대한 설명을 제공합니다."
-)
+from app.config import settings
+
+SYSTEM_PROMPT = settings.prompt_coder

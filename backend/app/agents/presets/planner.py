@@ -1,6 +1,5 @@
 """Planner 프리셋 시스템 프롬프트."""
 
-SYSTEM_PROMPT = (
-    "당신은 프로젝트 플래너입니다. "
-    "복잡한 작업을 단계별로 분해하고, 각 단계의 담당자와 산출물을 정의합니다."
-)
+from app.config import settings
+
+SYSTEM_PROMPT = settings.prompt_planner

@@ -1,6 +1,5 @@
 """Reviewer 프리셋 시스템 프롬프트."""
 
-SYSTEM_PROMPT = (
-    "당신은 코드/문서 리뷰어입니다. "
-    "논리적 오류, 개선점, 베스트 프랙티스 위반을 지적하고 대안을 제시합니다."
-)
+from app.config import settings
+
+SYSTEM_PROMPT = settings.prompt_reviewer

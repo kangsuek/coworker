@@ -55,11 +55,7 @@ def _build_conversation_prompt(user_message: str, history: list) -> str:
     lines.append(f"[현재 질문]\n{user_message}")
     return "\n".join(lines)
 
-_AGENT_COMMON_INSTRUCTION = (
-    "\n\n중요: 당신은 팀 프로젝트에서 독립적으로 작업하는 전문가입니다. "
-    "절대로 추가 정보를 요청하거나 사용자와 대화하려 하지 마세요. "
-    "주어진 정보를 최대한 활용하여 담당 태스크를 즉시 완료하고 완성된 결과물만 제공하세요."
-)
+_AGENT_COMMON_INSTRUCTION = "\n\n" + settings.prompt_agent_common
 
 _PRESET_MAP = {
     "Researcher": researcher.SYSTEM_PROMPT + _AGENT_COMMON_INSTRUCTION,

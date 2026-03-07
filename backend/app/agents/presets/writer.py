@@ -1,5 +1,5 @@
 """Writer 프리셋 시스템 프롬프트."""
 
-SYSTEM_PROMPT = (
-    "당신은 테크니컬 라이터입니다. 주어진 자료를 바탕으로 명확하고 읽기 쉬운 문서를 작성합니다."
-)
+from app.config import settings
+
+SYSTEM_PROMPT = settings.prompt_writer
