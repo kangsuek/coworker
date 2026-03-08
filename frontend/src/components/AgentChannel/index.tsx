@@ -105,7 +105,7 @@ export default function AgentChannel({
           {onCloseMobile && (
             <button 
               onClick={onCloseMobile}
-              className="lg:hidden p-1.5 rounded-full hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-400 ml-2"
+              className="p-1.5 rounded-full hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-400 ml-2"
             >
               <PanelRightClose size={18} />
             </button>

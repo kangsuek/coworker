@@ -46,8 +46,17 @@ function loadTheme(): 'light' | 'dark' {
 
 function App() {
   const [theme, setTheme] = useState<'light' | 'dark'>(loadTheme)
-  const [isSidebarOpen, setIsSidebarOpen] = useState(typeof window !== 'undefined' ? window.innerWidth >= 1024 : true)
-  const [isAgentPanelOpen, setIsAgentPanelOpen] = useState(true)
+  const [isSidebarOpen, setIsSidebarOpen] = useState(typeof window !== 'undefined' ? window.innerWidth >= 768 : true)
+  const [isAgentPanelOpen, setIsAgentPanelOpen] = useState(typeof window !== 'undefined' ? window.innerWidth >= 1024 : true)
+
+  useEffect(() => {
+    const handleResize = () => {
+      setIsSidebarOpen(window.innerWidth >= 768)
+      setIsAgentPanelOpen(window.innerWidth >= 1024)
+    }
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
+  }, [])
   
   const [currentMode, setCurrentMode] = useState<'solo' | 'team' | null>(null)
   const [currentRunId, setCurrentRunId] = useState<string | null>(null)
@@ -184,12 +193,17 @@ function App() {
 
   return (
     <div className={`flex h-screen w-full overflow-hidden transition-colors duration-300 ${isDarkMode ? 'bg-zinc-950 text-zinc-100' : 'bg-zinc-50 text-zinc-900'} font-sans`}>
+      {/* macOS hiddenInset 타이틀바: 트래픽 라이트 전용 드래그 영역 (fixed, 항상 최상단) */}
+      <div
+        style={{ WebkitAppRegion: 'drag', height: 40, top: 0, left: 0, right: 0, position: 'fixed', zIndex: 9999 } as React.CSSProperties}
+        className={isDarkMode ? 'bg-zinc-900' : 'bg-white'}
+      />
       
       {/* Left Sidebar */}
       <div className={`
-        fixed inset-y-0 left-0 z-40 transform transition-all duration-300 ease-in-out overflow-hidden
-        lg:relative lg:translate-x-0 shrink-0
-        ${isSidebarOpen ? 'w-72 translate-x-0' : 'w-72 -translate-x-full lg:w-0 lg:border-none'}
+        fixed inset-y-0 left-0 z-40 transform transition-all duration-300 ease-in-out overflow-hidden pt-10
+        md:relative md:translate-x-0 md:pt-10 shrink-0
+        ${isSidebarOpen ? 'w-72 translate-x-0' : 'w-72 -translate-x-full md:w-0 md:border-none'}
         ${isDarkMode ? 'bg-zinc-900 border-zinc-800' : 'bg-white border-zinc-200'}
         border-r
       `}>
@@ -211,14 +225,14 @@ function App() {
 
       {/* Mobile background overlay */}
       {isSidebarOpen && (
-        <div 
-          className="fixed inset-0 bg-black/50 z-30 lg:hidden backdrop-blur-sm transition-opacity"
+        <div
+          className="fixed inset-0 bg-black/50 z-30 md:hidden backdrop-blur-sm transition-opacity"
           onClick={() => setIsSidebarOpen(false)}
         />
       )}
 
       {/* Main Chat Area */}
-      <div className={`flex-1 flex flex-col relative min-w-0 ${isDarkMode ? 'bg-zinc-950' : 'bg-zinc-50'}`}>
+      <div className={`flex-1 flex flex-col relative min-w-0 pt-10 ${isDarkMode ? 'bg-zinc-950' : 'bg-zinc-50'}`}>
         {/* Main Header */}
         <header className={`flex items-center justify-between p-3 border-b shrink-0 ${isDarkMode ? 'border-zinc-800/80 bg-zinc-950' : 'border-zinc-200 bg-white'}`}>
           <div className="flex items-center gap-3">
@@ -298,8 +312,8 @@ function App() {
 
       {/* Right Panel (Agent Channel) */}
       <div className={`
-        fixed inset-y-0 right-0 z-40 w-full md:w-[400px] transform transition-transform duration-300 ease-in-out flex flex-col shrink-0
-        lg:relative lg:translate-x-0 lg:w-[480px]
+        fixed inset-y-0 right-0 z-40 w-full sm:w-[400px] transform transition-transform duration-300 ease-in-out flex flex-col shrink-0 pt-10
+        lg:relative lg:translate-x-0 lg:w-[480px] lg:pt-10
         ${isAgentPanelOpen ? 'translate-x-0' : 'translate-x-full lg:hidden lg:w-0 lg:border-none'}
         ${isDarkMode ? 'bg-zinc-950 border-zinc-800' : 'bg-zinc-50 border-zinc-200'}
         border-l shadow-2xl lg:shadow-none

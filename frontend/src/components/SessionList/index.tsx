@@ -95,7 +95,7 @@ export default function SessionList({
           {onCloseMobile && (
             <button 
               onClick={onCloseMobile}
-              className="lg:hidden p-2 rounded-full hover:bg-zinc-800 text-zinc-400"
+              className="md:hidden p-2 rounded-full hover:bg-zinc-800 text-zinc-400"
               title="사이드바 닫기"
             >
               <X size={20} />
