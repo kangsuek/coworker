@@ -122,6 +122,16 @@ async def _classify_with_llm(
                     for idx, role_name in explicit_roles.items():
                         if idx < len(result):
                             result[idx].role = role_name
+
+                # BUG-H01: LLM이 원본보다 적은 에이전트를 반환하면 태스크 누락 → 원본 유지
+                if len(result) < len(current_agents):
+                    import logging as _log
+                    _log.getLogger(__name__).warning(
+                        "LLM 분류 에이전트 수 불일치 (원본=%d, LLM=%d), 원본 유지",
+                        len(current_agents), len(result),
+                    )
+                    return current_agents
+
                 return result
             except (json.JSONDecodeError, ValidationError):
                 continue

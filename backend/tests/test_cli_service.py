@@ -20,7 +20,7 @@ from app.services.cli_service import (
     _call_claude_sync,
     call_claude_streaming,
     cancel_current,
-    execute_with_lock,
+    execute_if_not_cancelled,
 )
 
 # ---------------------------------------------------------------------------
@@ -47,6 +47,7 @@ def test_call_claude_sync_returns_output(mock_popen):
         result = _call_claude_sync(
             system_prompt="You are helpful.",
             user_message="Hello",
+            output_json=True,
         )
     assert result == "line1\nline2\nline3\n"
 
@@ -59,6 +60,7 @@ def test_call_claude_sync_calls_on_line_callback(mock_popen):
             system_prompt="You are helpful.",
             user_message="Hello",
             on_line=callback,
+            output_json=True,
         )
     assert callback.call_count == 3
     callback.assert_any_call("line1\n")
@@ -95,6 +97,7 @@ async def test_call_claude_streaming_async(mock_popen):
         result = await call_claude_streaming(
             system_prompt="You are helpful.",
             user_message="Hello",
+            output_json=True,
         )
     assert "line1" in result
 
@@ -178,8 +181,8 @@ async def test_line_buffer_flusher_stop_flushes_remaining():
 
 
 @pytest.mark.asyncio
-async def test_execute_with_lock_parallel_execution():
-    """execute_with_lock은 락 없이 병렬 실행 허용 — 두 태스크 모두 정상 완료 확인."""
+async def test_execute_if_not_cancelled_parallel_execution():
+    """execute_if_not_cancelled은 락 없이 병렬 실행 허용 — 두 태스크 모두 정상 완료 확인."""
     async def task_a():
         await asyncio.sleep(0.05)
         return "result_a"
@@ -188,8 +191,8 @@ async def test_execute_with_lock_parallel_execution():
         return "result_b"
 
     result_a, result_b = await asyncio.gather(
-        execute_with_lock(task_a()),
-        execute_with_lock(task_b()),
+        execute_if_not_cancelled(task_a()),
+        execute_if_not_cancelled(task_b()),
     )
 
     assert result_a == "result_a"
@@ -205,7 +208,8 @@ async def test_cancel_current_kills_process_group():
     mock_proc.poll.return_value = None  # 아직 실행 중
     mock_proc.pid = 99999
 
-    mod._active_procs.add(mock_proc)
+    _test_key = "__untracked__"
+    mod._active_procs.setdefault(_test_key, []).append(mock_proc)
     try:
         with (
             patch("os.killpg") as mock_killpg,
@@ -214,8 +218,11 @@ async def test_cancel_current_kills_process_group():
             await cancel_current()
         mock_killpg.assert_called_once_with(99999, signal.SIGTERM)
     finally:
-        if mock_proc in mod._active_procs:
-            mod._active_procs.remove(mock_proc)
+        procs = mod._active_procs.get(_test_key, [])
+        if mock_proc in procs:
+            procs.remove(mock_proc)
+        if not procs and _test_key in mod._active_procs:
+            del mod._active_procs[_test_key]
 
 
 @pytest.mark.asyncio

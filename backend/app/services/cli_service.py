@@ -13,9 +13,9 @@ import asyncio
 import json
 import logging
 import os
+import queue
 import signal
 import subprocess
-import threading
 from collections.abc import Callable, Coroutine
 from typing import Any
 
@@ -191,7 +191,7 @@ async def call_claude_streaming(
     )
 
 
-async def execute_with_lock(coro, run_id: str | None = None):
+async def execute_if_not_cancelled(coro, run_id: str | None = None):
     """실행 전 취소 여부 확인 후 코루틴 실행."""
     if run_id and run_id in _cancelled_runs:
         logger.info("이미 취소된 Run: run_id=%s", run_id)
@@ -236,32 +236,34 @@ async def cancel_current(run_id: str | None = None):
 class LineBufferFlusher:
     """비동기 배치 flush 버퍼.
 
-    Popen stdout 라인을 인메모리 버퍼에 모아두고,
+    Popen stdout 라인을 thread-safe queue에 모아두고,
     비동기 태스크가 주기적으로 비동기 flush_callback을 호출한다.
-    모든 DB 쓰기 작업이 동일한 비동기 락(db_lock)을 사용할 수 있게 한다.
+
+    BUG-M01 수정: threading.Lock 대신 queue.Queue 사용하여
+    이벤트 루프 블로킹 방지 (append는 별도 스레드, flush는 이벤트 루프에서 실행).
     """
 
     def __init__(self, flush_callback: Callable[[list[str]], Coroutine[Any, Any, None]], flush_interval: float = 0.5):
         self._flush_callback = flush_callback
         self._flush_interval = flush_interval
-        self._lock = threading.Lock()  # 버퍼 접근용 동기 락 (append는 stdout 루프에서 호출됨)
-        self._buffer: list[str] = []
+        self._queue: queue.Queue[str] = queue.Queue()  # thread-safe, 이벤트 루프 비블로킹
         self._stop_event = asyncio.Event()
         self._task: asyncio.Task | None = None
 
     def append(self, line: str) -> None:
-        """버퍼에 라인 추가 (동기 호출 가능)."""
-        with self._lock:
-            self._buffer.append(line)
+        """버퍼에 라인 추가 (동기 호출 가능, 이벤트 루프 블로킹 없음)."""
+        self._queue.put_nowait(line)
 
     async def flush(self) -> None:
-        """버퍼 스왑 후 비동기 콜백 호출."""
-        with self._lock:
-            if not self._buffer:
-                return
-            snapshot = self._buffer
-            self._buffer = []
-
+        """큐에 쌓인 항목을 비동기 콜백으로 전달."""
+        snapshot: list[str] = []
+        while True:
+            try:
+                snapshot.append(self._queue.get_nowait())
+            except queue.Empty:
+                break
+        if not snapshot:
+            return
         await self._flush_callback(snapshot)
 
     async def _run_loop(self) -> None:

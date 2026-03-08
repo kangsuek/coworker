@@ -35,6 +35,8 @@ export default function UserChannel({
 }: Props) {
   const [input, setInput] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  // BUG-M03: 이중 제출 방지 — React 상태는 비동기이므로 ref로 즉시 잠금
+  const submittingRef = useRef(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const onModeChangeRef = useRef(onModeChange)
@@ -56,9 +58,10 @@ export default function UserChannel({
   }, [messages, runId, soloStreamingContent])
 
   const handleSend = async () => {
-    const isRunning = submitting || runId !== null
+    const isRunning = submittingRef.current || runId !== null
     if (!input.trim() || isRunning) return
 
+    submittingRef.current = true
     const text = input.trim()
     setInput('')
     setSubmitting(true)
@@ -91,6 +94,7 @@ export default function UserChannel({
         created_at: new Date().toISOString(),
       })
     } finally {
+      submittingRef.current = false
       setSubmitting(false)
     }
   }

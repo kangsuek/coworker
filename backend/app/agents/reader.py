@@ -21,7 +21,7 @@ from app.config import settings
 from app.models import db as models
 from app.models.schemas import AgentPlan, ClassificationResult
 from app.services.classification import classify_message
-from app.services.cli_service import LineBufferFlusher, cancel_current
+from app.services.cli_service import LineBufferFlusher, _cancelled_runs, cancel_current
 from app.services.llm import get_provider
 from app.services.session_service import (
     add_custom_role,
@@ -214,6 +214,19 @@ class ReaderAgent:
                     role_name = role_name.strip()
                     prompt = prompt.strip()
                     if role_name and prompt:
+                        # SEC-05: 커스텀 역할 입력 길이 검증
+                        if len(role_name) > 50:
+                            reply = f"⚠️ 역할명은 50자 이내로 입력해주세요. (현재: {len(role_name)}자)"
+                            async with self.db_lock:
+                                await create_user_message(self.db, session_id, "reader", reply, mode="solo")
+                                await update_run_status(self.db, run_id, "done", response=reply, mode="solo", finished_at=datetime.now(UTC))
+                            return
+                        if len(prompt) > 2000:
+                            reply = f"⚠️ 역할 프롬프트는 2000자 이내로 입력해주세요. (현재: {len(prompt)}자)"
+                            async with self.db_lock:
+                                await create_user_message(self.db, session_id, "reader", reply, mode="solo")
+                                await update_run_status(self.db, run_id, "done", response=reply, mode="solo", finished_at=datetime.now(UTC))
+                            return
                         await add_custom_role(self.db, session_id, role_name, prompt)
                         reply = f"✅ 역할 **{role_name}** 이(가) 이 세션에 등록되었습니다.\n\n> {prompt}"
                         async with self.db_lock:
@@ -312,6 +325,10 @@ class ReaderAgent:
                 await update_run_status(
                     self.db, run_id, "error", response=error_msg, finished_at=datetime.now(UTC)
                 )
+        finally:
+            # BUG-C01: 백그라운드 태스크 종료 시점에 _cancelled_runs 정리
+            # (update_run_status에서 "cancelled" 시 정리하지 않으므로 여기서 수행)
+            _cancelled_runs.discard(run_id)
 
     # 프로바이더별 분류 전용 경량 모델 (Claude: Haiku, Gemini: Flash)
     _CLASSIFY_MODEL: dict[str, str] = {
@@ -550,9 +567,18 @@ class ReaderAgent:
             await asyncio.gather(*agent_tasks.values(), return_exceptions=True)
             raise
 
+        # BUG-H02: 모든 에이전트 완료 후 통합 전 취소 여부 재확인
+        if run_id in _cancelled_runs:
+            logger.info("에이전트 완료 후 취소 감지, 통합 생략: run_id=%s", run_id)
+            return
+        run_mid = await self.db.get(models.Run, run_id)
+        if run_mid is None or run_mid.status == "cancelled":
+            logger.info("에이전트 완료 후 DB 취소 감지, 통합 생략: run_id=%s", run_id)
+            return
+
         async with self.db_lock:
             await update_run_status(self.db, run_id, "integrating")
-        
+
         final = await self._integrate_results(user_message, agent_results, run_id=run_id)
         
         async with self.db_lock:

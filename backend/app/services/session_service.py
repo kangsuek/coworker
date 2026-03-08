@@ -83,7 +83,7 @@ async def create_user_message(
         session.updated_at = datetime.now(UTC)
         if role == "user" and session.title is None:
             from app.config import settings
-            triggers = [t for t in [settings.team_trigger_header, settings.role_add_trigger] if t]
+            triggers = [t for t in [settings.team_trigger_header, settings.role_add_trigger, settings.memory_trigger] if t]
             if not any(content.startswith(t) for t in triggers):
                 session.title = content[:30] + ("…" if len(content) > 30 else "")
 
@@ -199,7 +199,9 @@ async def update_run_status(
         pass
 
     # 종료 상태 도달 시 취소 목록에서 정리 (메모리 누수 방지)
-    if status in ("done", "error", "cancelled"):
+    # "cancelled"는 제외: cancel 시그널이 살아 있어야 백그라운드 태스크가 신규 CLI 실행을 막을 수 있음
+    # _cancelled_runs 정리는 process_message finally 블록에서 수행
+    if status in ("done", "error"):
         try:
             from app.services.cli_service import _cancelled_runs
             _cancelled_runs.discard(run_id)

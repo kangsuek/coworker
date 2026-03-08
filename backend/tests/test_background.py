@@ -1,7 +1,7 @@
 """3-5. 백그라운드 실행 관리 테스트.
 
 _run_reader_agent가 run status를 올바르게 업데이트하고,
-ReaderAgent가 execute_with_lock을 통해 Lock을 획득함을 검증.
+ReaderAgent가 execute_if_not_cancelled을 통해 Lock을 획득함을 검증.
 """
 
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -29,7 +29,7 @@ async def test_background_task_updates_run_status(db):
 
     with (
         patch("app.routers.chat.async_session", return_value=_make_session_cm(db)),
-        patch("app.services.llm.claude_cli.ClaudeCliProvider.stream_generate", new_callable=AsyncMock) as mock_cli,
+        patch("app.services.llm.gemini_cli.GeminiCliProvider.stream_generate", new_callable=AsyncMock) as mock_cli,
     ):
         mock_cli.return_value = "완료 응답"
         await _run_reader_agent(sess.id, "안녕", run.id)
@@ -41,20 +41,20 @@ async def test_background_task_updates_run_status(db):
 
 @pytest.mark.asyncio
 async def test_background_task_acquires_lock(db):
-    """ReaderAgent 실행 시 execute_with_lock이 최소 2회 호출됨을 확인."""
+    """ReaderAgent 실행 시 execute_if_not_cancelled이 최소 2회 호출됨을 확인."""
     sess = await create_session(db)
     msg = await create_user_message(db, sess.id, "user", "테스트")
     run = await create_run(db, sess.id, msg.id)
 
     lock_calls: list[bool] = []
 
-    async def mock_execute_with_lock(coro):
+    async def mock_execute_if_not_cancelled(coro, run_id=None):
         lock_calls.append(True)
         return await coro
 
     with (
-        patch("app.services.llm.claude_cli.execute_with_lock", side_effect=mock_execute_with_lock),
-        patch("app.services.llm.claude_cli.call_claude_streaming", new_callable=AsyncMock) as mock_cli,
+        patch("app.services.llm.gemini_cli.execute_if_not_cancelled", side_effect=mock_execute_if_not_cancelled),
+        patch("app.services.llm.gemini_cli.call_gemini_streaming", new_callable=AsyncMock) as mock_cli,
     ):
         mock_cli.return_value = "응답"
         from app.agents.reader import ReaderAgent

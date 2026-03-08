@@ -2,7 +2,7 @@
 
 from collections.abc import Callable
 
-from app.services.cli_service import call_claude_streaming, execute_with_lock
+from app.services.cli_service import call_claude_streaming, execute_if_not_cancelled
 
 from .base import LLMProvider
 
@@ -18,7 +18,7 @@ class ClaudeCliProvider(LLMProvider):
     ) -> str:
         """Claude CLI를 통해 모델을 호출합니다."""
         run_id = kwargs.get("run_id")
-        return await execute_with_lock(
+        return await execute_if_not_cancelled(
             call_claude_streaming(
                 system_prompt=system_prompt,
                 user_message=user_message,

@@ -37,8 +37,8 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origin_list,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type"],
 )
 
 app.include_router(chat.router, prefix="/api")
@@ -56,9 +56,8 @@ async def health_check():
 # STATIC_DIR 환경변수가 설정된 경우에만 활성화된다.
 # 개발 모드에서는 Vite dev server가 처리하므로 비활성.
 # ---------------------------------------------------------------------------
-_static_dir = Path(os.environ.get("STATIC_DIR", "")) or (
-    Path(__file__).parent.parent / "static"
-)
+_static_env = os.environ.get("STATIC_DIR", "").strip()
+_static_dir = Path(_static_env) if _static_env else (Path(__file__).parent.parent / "static")
 
 if _static_dir.exists():
     # /assets, /icons 등 정적 자원 직접 서빙

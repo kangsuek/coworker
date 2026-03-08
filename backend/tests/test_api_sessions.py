@@ -26,7 +26,7 @@ async def test_list_sessions(client):
     for s in data:
         assert "llm_provider" in s
         assert "llm_model" in s
-        assert s["llm_provider"] == "claude-cli"
+        assert s["llm_provider"] == "gemini-cli"
 
 
 @pytest.mark.asyncio
@@ -38,9 +38,9 @@ async def test_create_session(client):
     assert "id" in data
     assert "created_at" in data
     assert "llm_provider" in data
-    assert data["llm_provider"] == "claude-cli"
+    assert data["llm_provider"] == "gemini-cli"
     assert "llm_model" in data
-    assert data["llm_model"] is None
+    assert data["llm_model"] == "gemini-3-flash-preview"
 
 
 @pytest.mark.asyncio
@@ -56,8 +56,8 @@ async def test_get_session_detail(client, db):
     assert len(data["messages"]) >= 1
     assert "llm_provider" in data
     assert "llm_model" in data
-    assert data["llm_provider"] == "claude-cli"
-    assert data["llm_model"] is None
+    assert data["llm_provider"] == "gemini-cli"
+    assert data["llm_model"] == "gemini-3-flash-preview"
 
 
 @pytest.mark.asyncio
@@ -149,11 +149,11 @@ async def test_list_sessions_pagination_limit(client):
 @pytest.mark.asyncio
 async def test_session_detail_returns_llm_settings(client, db):
     """커스텀 llm_provider/llm_model으로 생성한 세션 → GET 상세 시 해당 값 반환."""
-    sess = await create_session(db, llm_provider="claude-cli", llm_model="claude-3-5-sonnet")
+    sess = await create_session(db, llm_provider="gemini-cli", llm_model="claude-3-5-sonnet")
     response = await client.get(f"/api/sessions/{sess.id}")
     assert response.status_code == 200
     data = response.json()
-    assert data["llm_provider"] == "claude-cli"
+    assert data["llm_provider"] == "gemini-cli"
     assert data["llm_model"] == "claude-3-5-sonnet"
 
 

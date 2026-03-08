@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
 
 
 def _ensure_utc(dt: datetime) -> datetime:
@@ -26,7 +26,7 @@ CANCELLABLE_STATUSES: frozenset[str] = ACTIVE_RUN_STATUSES  # 현재 동일 — 
 class ChatRequest(BaseModel):
     model_config = ConfigDict(strict=True)
     session_id: str | None = None
-    message: str
+    message: str = Field(..., min_length=1, max_length=50000)
     llm_provider: str | None = None
     llm_model: str | None = None
 

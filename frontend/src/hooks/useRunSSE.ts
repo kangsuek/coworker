@@ -55,6 +55,7 @@ interface SSEEvent {
 
 const MAX_RECONNECT_DELAY = 16000
 const INITIAL_RECONNECT_DELAY = 1000
+const MAX_RECONNECT_ATTEMPTS = 8  // BUG-M04: 최대 재연결 시도 횟수 (초과 시 폴링 폴백)
 
 export function useRunSSE(runId: string | null, callbacks?: RunSSECallbacks) {
   const [runStatus, setRunStatus] = useState<RunStatus>(DEFAULT_RUN_STATUS)
@@ -66,6 +67,7 @@ export function useRunSSE(runId: string | null, callbacks?: RunSSECallbacks) {
   const stoppedRef = useRef(false)
   const reconnectDelayRef = useRef(INITIAL_RECONNECT_DELAY)
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const reconnectCountRef = useRef(0)
   const callbacksRef = useRef(callbacks)
   useEffect(() => {
     callbacksRef.current = callbacks
@@ -82,6 +84,7 @@ export function useRunSSE(runId: string | null, callbacks?: RunSSECallbacks) {
 
     stoppedRef.current = false
     reconnectDelayRef.current = INITIAL_RECONNECT_DELAY
+    reconnectCountRef.current = 0
 
     // React StrictMode에서 effect가 두 번 실행될 때 cleanup된 인스턴스가 콜백을 중복 호출하는 것을 방지
     let cleaned = false
@@ -218,6 +221,21 @@ export function useRunSSE(runId: string | null, callbacks?: RunSSECallbacks) {
         esRef.current = null
 
         if (!stoppedRef.current) {
+          reconnectCountRef.current += 1
+
+          // BUG-M04: 최대 재연결 횟수 초과 시 폴링으로 최종 상태 확인 후 중단
+          if (reconnectCountRef.current > MAX_RECONNECT_ATTEMPTS) {
+            stoppedRef.current = true
+            api.getRunStatus(runId!).then((finalStatus) => {
+              if (cleaned) return
+              setRunStatus(finalStatus)
+              if (TERMINAL_STATES.includes(finalStatus.status as RunStatusType)) {
+                void handleTerminal(finalStatus.status as RunStatusType)
+              }
+            }).catch(() => {})
+            return
+          }
+
           // 지수 백오프 재연결
           reconnectTimerRef.current = setTimeout(() => {
             reconnectDelayRef.current = Math.min(

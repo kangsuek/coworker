@@ -66,13 +66,15 @@ function App() {
 
   const [llmProvider, setLlmProvider] = useState('gemini-cli')
   const [llmModel, setLlmModel] = useState('gemini-3-flash-preview')
-  const [prevSessionId, setPrevSessionId] = useState<string | undefined>(undefined)
 
-  if (session.currentSession?.id !== prevSessionId) {
-    setPrevSessionId(session.currentSession?.id)
+  // BUG-M02: 렌더 내 setState 제거 → useEffect로 이전 (React 규칙 준수)
+  useEffect(() => {
     setLlmProvider(session.currentSession?.llm_provider || 'gemini-cli')
-    setLlmModel(session.currentSession?.llm_model || (session.currentSession?.llm_provider === 'claude-cli' ? 'haiku' : 'gemini-3-flash-preview'))
-  }
+    setLlmModel(
+      session.currentSession?.llm_model ||
+      (session.currentSession?.llm_provider === 'claude-cli' ? 'haiku' : 'gemini-3-flash-preview')
+    )
+  }, [session.currentSession?.id])
 
   useEffect(() => {
     if (theme === 'dark') {

@@ -10,7 +10,7 @@ from collections.abc import Callable
 
 from app.config import settings
 from .base import LLMProvider
-from app.services.cli_service import execute_with_lock, _cancelled_runs
+from app.services.cli_service import execute_if_not_cancelled, _cancelled_runs
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +37,11 @@ def _call_gemini_sync(
     model: str = kwargs.get("model", "")
 
     # Gemini CLI 호출 명령어 구성 (stream-json 실시간 스트리밍)
-    combined_prompt = f"System: {system_prompt}\n\nUser: {user_message}"
+    # SEC-04: 명시적 구분자로 시스템/사용자 영역 분리 (프롬프트 인젝션 완화)
+    combined_prompt = (
+        f"[SYSTEM INSTRUCTIONS]\n{system_prompt}\n[END SYSTEM INSTRUCTIONS]"
+        f"\n\n[USER MESSAGE]\n{user_message}\n[END USER MESSAGE]"
+    )
     cmd = ["gemini", "-p", combined_prompt, "--output-format", "stream-json"]
     if model:
         cmd.extend(["--model", model])
@@ -164,7 +168,7 @@ class GeminiCliProvider(LLMProvider):
     ) -> str:
         """Gemini CLI를 통해 모델을 호출합니다."""
         run_id = kwargs.get("run_id")
-        return await execute_with_lock(
+        return await execute_if_not_cancelled(
             call_gemini_streaming(
                 system_prompt=system_prompt,
                 user_message=user_message,
