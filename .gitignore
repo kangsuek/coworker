@@ -38,6 +38,14 @@ npm-debug.log*
 # Frontend build
 frontend/dist/
 
+# Backend static (frontend build artifact)
+backend/static/
+
+# DMG/EXE build artifacts
+build_dmg/node_modules/
+build_dmg/dist/
+build_dmg/resources/
+
 # Vite cache
 .vite/
 
