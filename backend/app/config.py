@@ -94,6 +94,11 @@ class Settings(BaseSettings):
             for role, kws in ordered
         ]
 
+    # 파일 업로드
+    upload_dir: str = "./data/uploads"
+    upload_max_size_mb: int = 10
+    upload_ttl_seconds: int = 3600
+
     # Session
     session_ttl_seconds: int = 3600
     db_path: str = "./data/coworker.db"

@@ -42,9 +42,14 @@ def _call_gemini_sync(
         f"[SYSTEM INSTRUCTIONS]\n{system_prompt}\n[END SYSTEM INSTRUCTIONS]"
         f"\n\n[USER MESSAGE]\n{user_message}\n[END USER MESSAGE]"
     )
-    cmd = ["gemini", "-p", combined_prompt, "--output-format", "stream-json"]
+    file_paths: list[str] = kwargs.get("file_paths") or []
+
+    cmd = ["gemini", "-p", combined_prompt]
     if model:
         cmd.extend(["--model", model])
+    for fp in file_paths:
+        cmd.extend(["--image", fp])
+    cmd.extend(["--output-format", "stream-json"])
 
     logger.debug("Gemini CLI 시작: run_id=%s, model=%s", run_id, model)
 

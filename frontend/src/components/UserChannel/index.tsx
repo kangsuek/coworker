@@ -6,6 +6,25 @@ import type { RunStatus, Session, UserMessage } from '../../types/api'
 import MessageBubble from './MessageBubble'
 import StatusBadge from './StatusBadge'
 
+// LLM(Claude/Gemini CLI)이 처리 가능한 파일 확장자 목록
+const ALLOWED_EXTENSIONS = new Set([
+  // 텍스트 / 문서
+  '.txt', '.md', '.markdown', '.rst', '.csv', '.tsv', '.log',
+  // 코드
+  '.py', '.js', '.ts', '.tsx', '.jsx', '.html', '.htm', '.css', '.scss', '.sass',
+  '.json', '.yaml', '.yml', '.toml', '.xml', '.env', '.sh', '.bash', '.zsh',
+  '.sql', '.graphql', '.proto',
+  '.rs', '.go', '.java', '.c', '.cpp', '.h', '.hpp', '.cs', '.rb', '.php',
+  '.swift', '.kt', '.r', '.scala', '.dart', '.lua', '.vim', '.dockerfile',
+  '.makefile', '.gitignore',
+  // 문서
+  '.pdf',
+  // 이미지 (비전 지원)
+  '.jpg', '.jpeg', '.png', '.gif', '.webp',
+])
+
+const ACCEPT_ATTR = Array.from(ALLOWED_EXTENSIONS).join(',')
+
 interface Props {
   currentSession: Session | null
   messages: UserMessage[]
@@ -35,6 +54,8 @@ export default function UserChannel({
 }: Props) {
   const [input, setInput] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [attachedFiles, setAttachedFiles] = useState<File[]>([])
+  const [fileError, setFileError] = useState<string | null>(null)
   // BUG-M03: 이중 제출 방지 — React 상태는 비동기이므로 ref로 즉시 잠금
   const submittingRef = useRef(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -75,11 +96,20 @@ export default function UserChannel({
     })
 
     try {
-      const resp = await api.chat({ 
-        session_id: currentSession?.id, 
+      // 첨부 파일이 있으면 먼저 업로드
+      let file_ids: string[] = []
+      if (attachedFiles.length > 0) {
+        const uploadResult = await api.uploadFiles(attachedFiles)
+        file_ids = uploadResult.uploaded.map((f) => f.file_id)
+        setAttachedFiles([])
+      }
+
+      const resp = await api.chat({
+        session_id: currentSession?.id,
         message: text,
         llm_provider: llmProvider,
         llm_model: llmModel || null,
+        file_ids: file_ids.length > 0 ? file_ids : undefined,
       })
       if (!currentSession) {
         onSessionCreated(resp.session_id)
@@ -145,18 +175,63 @@ export default function UserChannel({
       </div>
 
       <div className="p-4 w-full border-t border-zinc-200 dark:border-zinc-800/80 bg-white dark:bg-zinc-950 shrink-0">
-        <div className="max-w-4xl mx-auto flex gap-2 items-center h-10">
+        <div className="max-w-4xl mx-auto">
+        {/* 첨부 파일 목록 */}
+        {attachedFiles.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 mb-2">
+            {attachedFiles.map((file) => (
+              <span
+                key={file.name}
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-700"
+              >
+                {file.name}
+                <button
+                  type="button"
+                  onClick={() => setAttachedFiles((prev) => prev.filter((f) => f.name !== file.name))}
+                  className="hover:text-red-500 transition-colors ml-0.5"
+                >
+                  <X size={12} />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+        {/* 확장자 오류 메시지 */}
+        {fileError && (
+          <p className="text-xs text-red-500 mb-2">{fileError}</p>
+        )}
+        <div className="flex gap-2 items-center h-10">
           <input
             ref={fileInputRef}
             type="file"
             multiple
             className="hidden"
-            accept="*/*"
+            accept={ACCEPT_ATTR}
             onChange={(e) => {
-              const files = e.target.files
-              if (files?.length) {
-                // TODO: 파일 첨부 처리 (미리보기/업로드 연동)
-                e.target.value = ''
+              const files = Array.from(e.target.files ?? [])
+              e.target.value = ''
+              if (!files.length) return
+
+              const rejected: string[] = []
+              const accepted: File[] = []
+              for (const file of files) {
+                const ext = '.' + file.name.split('.').pop()?.toLowerCase()
+                if (ALLOWED_EXTENSIONS.has(ext)) {
+                  accepted.push(file)
+                } else {
+                  rejected.push(file.name)
+                }
+              }
+
+              if (rejected.length > 0) {
+                setFileError(`지원하지 않는 파일: ${rejected.join(', ')}`)
+                setTimeout(() => setFileError(null), 4000)
+              }
+              if (accepted.length > 0) {
+                setAttachedFiles((prev) => {
+                  const names = new Set(prev.map((f) => f.name))
+                  return [...prev, ...accepted.filter((f) => !names.has(f.name))]
+                })
               }
             }}
           />
@@ -206,6 +281,7 @@ export default function UserChannel({
               전송
             </button>
           )}
+        </div>
         </div>
       </div>
     </>

@@ -1,6 +1,7 @@
 import asyncio
+from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,8 +17,11 @@ from app.models.schemas import (
     RunStatus,
     TimingInfo,
 )
-from app.services.cli_service import cancel_current
+from app.services.cli_service import cancel_current, get_active_cli_count
 from app.services.llm import get_allowed_provider_names
+from app.services.upload_service import UPLOAD_DIR, cleanup_expired_uploads, get_upload_path, save_upload
+
+MAX_UPLOAD_SIZE_BYTES: int = settings.upload_max_size_mb * 1024 * 1024
 from app.services.session_service import (
     create_run,
     create_session,
@@ -31,10 +35,13 @@ from app.services.stream_service import stream_manager
 router = APIRouter(tags=["chat"])
 
 
-async def _run_reader_agent(session_id: str, user_message: str, run_id: str) -> None:
+async def _run_reader_agent(
+    session_id: str, user_message: str, run_id: str,
+    file_paths: list[str] | None = None,
+) -> None:
     """백그라운드 태스크: 자체 DB 세션으로 ReaderAgent 실행."""
     async with async_session() as db:
-        await ReaderAgent(db).process_message(session_id, user_message, run_id)
+        await ReaderAgent(db).process_message(session_id, user_message, run_id, file_paths=file_paths or [])
 
 
 @router.post("/chat", response_model=ChatResponse)
@@ -75,7 +82,14 @@ async def create_chat(
 
     user_msg = await create_user_message(db, session.id, "user", req.message)
     run = await create_run(db, session.id, user_msg.id)
-    background_tasks.add_task(_run_reader_agent, session.id, req.message, run.id)
+    # file_ids → 실제 파일 경로 변환 (존재하지 않는 ID는 건너뜀)
+    file_paths: list[str] = []
+    for fid in (req.file_ids or []):
+        path = get_upload_path(fid, Path(UPLOAD_DIR))
+        if path:
+            file_paths.append(str(path))
+
+    background_tasks.add_task(_run_reader_agent, session.id, req.message, run.id, file_paths)
     return ChatResponse(run_id=run.id, session_id=session.id)
 
 
@@ -140,6 +154,42 @@ async def cancel_run(run_id: str, db: AsyncSession = Depends(get_db)):
 
     final_status = "cancelled" if run.status in CANCELLABLE_STATUSES else run.status
     return {"run_id": run_id, "status": final_status}
+
+
+@router.get("/cli/status")
+async def get_cli_status():
+    """현재 실행 중인 CLI 프로세스 수 반환."""
+    return {"active_cli_count": get_active_cli_count()}
+
+
+@router.post("/upload", status_code=200)
+async def upload_files(files: list[UploadFile]):
+    """첨부 파일을 임시 저장 후 file_id 목록 반환.
+
+    - 파일이 없으면 422
+    - 허용되지 않는 확장자가 하나라도 있으면 422 (전체 거부)
+    - 파일 크기 초과 시 413
+    """
+    if not files:
+        raise HTTPException(status_code=422, detail="첨부 파일이 없습니다.")
+
+    upload_dir = Path(UPLOAD_DIR)
+    uploaded = []
+    for file in files:
+        try:
+            result = await save_upload(file, upload_dir, MAX_UPLOAD_SIZE_BYTES)
+        except ValueError as e:
+            msg = str(e)
+            if "파일 크기" in msg:
+                raise HTTPException(status_code=413, detail=msg)
+            raise HTTPException(status_code=422, detail=msg)
+        uploaded.append({
+            "file_id": result["file_id"],
+            "filename": result["filename"],
+            "size": result["size"],
+        })
+
+    return {"uploaded": uploaded}
 
 
 @router.get("/runs/{run_id}/stream")

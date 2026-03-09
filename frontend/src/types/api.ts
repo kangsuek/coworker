@@ -3,6 +3,7 @@ export interface ChatRequest {
   message: string
   llm_provider?: string | null
   llm_model?: string | null
+  file_ids?: string[]
 }
 
 export interface ChatResponse {
@@ -87,4 +88,14 @@ export interface Memory {
   id: string
   content: string
   created_at: string
+}
+
+export interface UploadedFile {
+  file_id: string
+  filename: string
+  size: number
+}
+
+export interface UploadResponse {
+  uploaded: UploadedFile[]
 }

@@ -6,6 +6,7 @@ import type {
   RunStatus,
   Session,
   SessionDetail,
+  UploadResponse,
 } from '../types/api'
 
 const API_BASE = '/api'
@@ -70,4 +71,12 @@ export const api = {
   getMemories: () => get<Memory[]>('/memories'),
   createMemory: (content: string) => post<Memory>('/memories', { content }),
   deleteMemory: (id: string) => del(`/memories/${id}`),
+  getCliStatus: () => get<{ active_cli_count: number }>('/cli/status'),
+  uploadFiles: async (files: File[]): Promise<UploadResponse> => {
+    const form = new FormData()
+    files.forEach((f) => form.append('files', f))
+    const res = await fetchWithRetry('/api/upload', { method: 'POST', body: form })
+    if (!res.ok) throw new Error(`POST /upload failed: ${res.status}`)
+    return res.json()
+  },
 }

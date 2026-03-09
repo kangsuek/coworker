@@ -11,6 +11,7 @@ import logging
 import os
 import sqlite3
 from datetime import UTC, datetime
+from pathlib import Path
 
 from sqlalchemy import text as sql_text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -40,6 +41,57 @@ logger = logging.getLogger(__name__)
 
 CONTEXT_CHAR_LIMIT = int(os.getenv("CONTEXT_CHAR_LIMIT", "3000"))
 _HISTORY_MSG_LIMIT = 20  # 최근 20개 메시지 (약 10턴)
+
+
+_BINARY_EXTENSIONS: frozenset[str] = frozenset({
+    ".jpg", ".jpeg", ".png", ".gif", ".webp", ".pdf"
+})
+
+_TEXT_INJECT_LIMIT = 20000  # 파일당 최대 삽입 글자 수
+
+
+def _split_files(file_paths: list[str]) -> tuple[list[str], list[str]]:
+    """파일 경로 목록을 네이티브(이미지/PDF) vs 텍스트(프롬프트 인젝션)으로 분리.
+
+    Returns:
+        (native_paths, text_paths)
+    """
+    native: list[str] = []
+    text_files: list[str] = []
+    for p in file_paths:
+        ext = Path(p).suffix.lower()
+        if ext in _BINARY_EXTENSIONS:
+            native.append(p)
+        else:
+            text_files.append(p)
+    return native, text_files
+
+
+def _inject_text_files(user_message: str, text_file_paths: list[str]) -> str:
+    """텍스트/코드 파일 내용을 user_message 뒤에 삽입.
+
+    존재하지 않는 파일은 건너뜀.
+    _TEXT_INJECT_LIMIT 초과 파일 내용은 잘라서 삽입.
+    """
+    if not text_file_paths:
+        return user_message
+
+    parts = [user_message, "\n\n[첨부 파일]"]
+    for path in text_file_paths:
+        p = Path(path)
+        if not p.exists():
+            logger.warning("첨부 파일 없음, 건너뜀: %s", path)
+            continue
+        try:
+            content = p.read_text(errors="replace")
+        except OSError:
+            logger.warning("첨부 파일 읽기 실패, 건너뜀: %s", path)
+            continue
+        if len(content) > _TEXT_INJECT_LIMIT:
+            content = content[:_TEXT_INJECT_LIMIT] + "\n...(이하 생략)"
+        parts.append(f"\n--- {p.name} ---\n{content}")
+
+    return "\n".join(parts)
 
 
 def _today_context() -> str:
@@ -122,9 +174,11 @@ class ReaderAgent:
         self.db_lock = asyncio.Lock()
 
     async def process_message(
-        self, session_id: str, user_message: str, run_id: str
+        self, session_id: str, user_message: str, run_id: str,
+        file_paths: list[str] | None = None,
     ) -> None:
         """메시지 처리: 분류 → Solo/Team 실행."""
+        file_paths = file_paths or []
         try:
             # 현재 run의 user_message_id를 찾아 대화 이력에서 제외
             run = await self.db.get(models.Run, run_id)
@@ -268,7 +322,7 @@ class ReaderAgent:
                     limit=_HISTORY_MSG_LIMIT,
                     exclude_id=current_msg_id,
                 )
-                text = await self._solo_respond(user_message, history, run_id=run_id)
+                text = await self._solo_respond(user_message, history, run_id=run_id, file_paths=file_paths)
                 
                 async with self.db_lock:
                     # CLI 실행 도중 세션이 삭제됐을 수 있으므로 run 존재 여부 재확인
@@ -281,7 +335,7 @@ class ReaderAgent:
                         response=text, mode="solo", finished_at=datetime.now(UTC),
                     )
             else:
-                await self._team_execute(result, user_message, session_id, run_id)
+                await self._team_execute(result, user_message, session_id, run_id, file_paths=file_paths)
         except Exception as e:
             logger.exception("process_message 실패: run_id=%s", run_id)
 
@@ -357,15 +411,24 @@ class ReaderAgent:
         return result
 
     async def _solo_respond(
-        self, user_message: str, history: list | None = None, run_id: str | None = None
+        self, user_message: str, history: list | None = None, run_id: str | None = None,
+        file_paths: list[str] | None = None,
     ) -> str:
         """Solo 모드 응답 생성. history가 있으면 대화 이력을 프롬프트에 포함.
+
+        file_paths가 있으면:
+          - 텍스트/코드 파일은 프롬프트에 내용 삽입
+          - 이미지/PDF는 file_paths kwarg로 CLI에 전달 (Phase 3에서 --file 플래그로 연결)
 
         run_id가 있으면 LineBufferFlusher로 0.5초마다 SSE solo_content 이벤트를 broadcast하여
         프론트엔드 채팅창에 실시간 스트리밍 표시한다.
         """
+        file_paths = file_paths or []
+        native_files, text_files = _split_files(file_paths)
+
         memories = getattr(self, "memories", [])
-        prompt = _today_context() + _memory_context(memories) + _build_conversation_prompt(user_message, history or [])
+        enriched_message = _inject_text_files(user_message, text_files)
+        prompt = _today_context() + _memory_context(memories) + _build_conversation_prompt(enriched_message, history or [])
         model_to_use = self.session_model or settings.solo_model
 
         if not run_id:
@@ -374,6 +437,7 @@ class ReaderAgent:
                 prompt,
                 model=model_to_use,
                 run_id=run_id,
+                file_paths=native_files,
             )
 
         # SSE 실시간 스트리밍용 콜백
@@ -407,6 +471,7 @@ class ReaderAgent:
                 on_line=on_line,
                 model=model_to_use,
                 run_id=run_id,
+                file_paths=native_files,
             )
         finally:
             await flusher.stop()
@@ -419,8 +484,12 @@ class ReaderAgent:
         user_message: str,
         session_id: str,
         run_id: str,
+        file_paths: list[str] | None = None,
     ) -> None:
         """Team 모드 전체 흐름 (병렬 실행 지원)."""
+        file_paths = file_paths or []
+        native_files, text_files = _split_files(file_paths)
+        enriched_message = _inject_text_files(user_message, text_files)
         async with self.db_lock:
             await update_run_status(self.db, run_id, "delegating", mode="team")
 
@@ -522,13 +591,13 @@ class ReaderAgent:
                 full_task = (
                     f"{_today_context()}"
                     f"{_memory_context(getattr(self, 'memories', []))}"
-                    f"[전체 프로젝트 요청]\n{user_message}\n\n"
+                    f"[전체 프로젝트 요청]\n{enriched_message}\n\n"
                     f"[당신의 담당 태스크]\n{agent_plan.task}"
                 )
 
                 try:
                     model_to_use = self.session_model or settings.team_model
-                    result = await agent.execute(full_task, full_context, on_line, model=model_to_use, run_id=run_id)
+                    result = await agent.execute(full_task, full_context, on_line, model=model_to_use, run_id=run_id, file_paths=native_files)
                 except Exception:
                     await flusher.stop()
                     async with self.db_lock:
@@ -579,7 +648,7 @@ class ReaderAgent:
         async with self.db_lock:
             await update_run_status(self.db, run_id, "integrating")
 
-        final = await self._integrate_results(user_message, agent_results, run_id=run_id)
+        final = await self._integrate_results(enriched_message, agent_results, run_id=run_id)
         
         async with self.db_lock:
             # 통합 CLI 실행 도중 세션이 삭제됐을 수 있으므로 run 존재 여부 재확인

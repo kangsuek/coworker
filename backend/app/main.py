@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -11,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from app.config import settings
 from app.models.db import engine, run_pragmas
 from app.routers import chat, memory, sessions
+from app.services.upload_service import UPLOAD_DIR, cleanup_expired_uploads
 
 logging.basicConfig(
     level=logging.INFO,
@@ -19,11 +21,28 @@ logging.basicConfig(
 )
 
 
+_CLEANUP_INTERVAL = 30 * 60  # 30분
+
+logger = logging.getLogger(__name__)
+
+
+async def _periodic_cleanup() -> None:
+    """만료된 업로드 파일을 30분마다 정리한다."""
+    while True:
+        await asyncio.sleep(_CLEANUP_INTERVAL)
+        try:
+            cleanup_expired_uploads(Path(UPLOAD_DIR), settings.upload_ttl_seconds)
+        except Exception:
+            logger.exception("업로드 파일 정기 정리 중 오류 발생")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         await run_pragmas(conn)
+    cleanup_task = asyncio.create_task(_periodic_cleanup())
     yield
+    cleanup_task.cancel()
     await engine.dispose()
 
 

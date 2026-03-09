@@ -53,9 +53,13 @@ def _call_claude_sync(
     timeout: int = kwargs.get("timeout", settings.claude_cli_timeout)
     model: str = kwargs.get("model", "")
 
+    file_paths: list[str] = kwargs.get("file_paths") or []
+
     cmd = [settings.claude_cli_path, "-p", user_message, "--system-prompt", system_prompt]
     if model:
         cmd.extend(["--model", model])
+    for fp in file_paths:
+        cmd.extend(["--file", fp])
     if output_json:
         cmd.extend(["--output-format", "json"])
     else:
@@ -231,6 +235,11 @@ async def cancel_current(run_id: str | None = None):
                 os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
             except (ProcessLookupError, OSError):
                 pass
+
+
+def get_active_cli_count() -> int:
+    """현재 실행 중인 CLI 프로세스 수 반환."""
+    return sum(len(procs) for procs in _active_procs.values())
 
 
 class LineBufferFlusher:

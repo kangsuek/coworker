@@ -29,6 +29,7 @@ class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=50000)
     llm_provider: str | None = None
     llm_model: str | None = None
+    file_ids: list[str] = Field(default_factory=list)
 
 
 class SessionUpdateRequest(BaseModel):

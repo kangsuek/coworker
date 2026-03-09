@@ -142,8 +142,8 @@ export default function AgentChannel({
         <div ref={messagesEndRef} className="h-2"></div>
       </div>
 
-      {/* 6-6: Agent 요약 표시 */}
-      {hasMessages && <AgentStatusBar messages={messages} isActive={isRunActive} />}
+      {/* 6-6: Agent 요약 표시 (실행 중이거나 메시지 있을 때) */}
+      {(hasMessages || isRunActive) && <AgentStatusBar messages={messages} isActive={isRunActive} />}
 
       {/* 다운로드 완료 토스트 */}
       {toast && (
