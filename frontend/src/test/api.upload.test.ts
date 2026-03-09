@@ -38,7 +38,7 @@ describe('api.uploadFiles', () => {
 
   it('FormData에 files 키로 파일이 담겨야 한다', async () => {
     let capturedBody: FormData | null = null
-    const mockFetch = vi.fn().mockImplementation((url, options) => {
+    const mockFetch = vi.fn().mockImplementation((_url, options) => {
       capturedBody = options.body
       return Promise.resolve({
         ok: true,
@@ -52,13 +52,13 @@ describe('api.uploadFiles', () => {
     await api.uploadFiles([file])
 
     expect(capturedBody).not.toBeNull()
-    const entries = Array.from((capturedBody as FormData).entries())
+    const entries = Array.from((capturedBody as unknown as FormData).entries())
     expect(entries.some(([key, val]) => key === 'files' && (val as File).name === 'main.py')).toBe(true)
   })
 
   it('복수 파일을 FormData에 모두 담아야 한다', async () => {
     let capturedBody: FormData | null = null
-    const mockFetch = vi.fn().mockImplementation((url, options) => {
+    const mockFetch = vi.fn().mockImplementation((_url, options) => {
       capturedBody = options.body
       return Promise.resolve({
         ok: true,
