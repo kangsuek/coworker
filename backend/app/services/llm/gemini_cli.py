@@ -9,6 +9,7 @@ import subprocess
 from collections.abc import Callable
 
 from app.config import settings
+from app.services import settings_service
 from .base import LLMProvider
 from app.services.cli_service import execute_if_not_cancelled, _cancelled_runs
 
@@ -44,7 +45,8 @@ def _call_gemini_sync(
     )
     file_paths: list[str] = kwargs.get("file_paths") or []
 
-    cmd = ["gemini", "-p", combined_prompt]
+    gemini_path = settings_service.get("gemini_cli_path") or settings.gemini_cli_path
+    cmd = [gemini_path, "-p", combined_prompt]
     if model:
         cmd.extend(["--model", model])
     for fp in file_paths:
@@ -58,6 +60,11 @@ def _call_gemini_sync(
         logger.info("Gemini CLI 실행 전 취소됨: run_id=%s", run_id)
         raise RuntimeError(f"Run {run_id} cancelled before execution")
 
+    # PATH 보강: 패키징 앱은 PATH=/usr/bin:/bin만 제공 — node/cli 도구 경로 추가
+    child_env = dict(os.environ)
+    _extra = "/usr/local/bin:/opt/homebrew/bin:/opt/homebrew/sbin"
+    child_env["PATH"] = _extra + ":" + child_env.get("PATH", "")
+
     proc = subprocess.Popen(
         cmd,
         stdout=subprocess.PIPE,
@@ -66,6 +73,7 @@ def _call_gemini_sync(
         text=True,
         start_new_session=True,
         bufsize=1,
+        env=child_env,
         cwd="/tmp",  # GEMINI.md 자동 로드 방지 (프로젝트 컨텍스트 오염 차단)
     )
 

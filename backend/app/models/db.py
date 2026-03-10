@@ -1,7 +1,7 @@
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import ForeignKey, Text, event, text
+from sqlalchemy import ForeignKey, Text, UniqueConstraint, event, text
 from sqlalchemy.ext.asyncio import (
     AsyncConnection,
     AsyncSession,
@@ -93,6 +93,21 @@ class GlobalMemory(Base):
     id: Mapped[str] = mapped_column(primary_key=True, default=lambda: str(uuid.uuid4()))
     content: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(UTC))
+
+
+class AppSetting(Base):
+    """UI에서 관리 가능한 앱 설정 (key-value store)."""
+
+    __tablename__ = "app_settings"
+    __table_args__ = (UniqueConstraint("key", name="uq_app_settings_key"),)
+
+    id: Mapped[str] = mapped_column(primary_key=True, default=lambda: str(uuid.uuid4()))
+    key: Mapped[str] = mapped_column(Text, index=True)
+    value: Mapped[str] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
 
 
 class Run(Base):

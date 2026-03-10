@@ -20,6 +20,8 @@ a = Analysis(
     datas=[
         # React 빌드 결과물 (build.sh에서 복사 완료 후 실행)
         (str(BACKEND_DIR / 'static'), 'static'),
+        # 시드 DB (첫 실행 시 사용자 데이터 디렉토리로 복사)
+        (str(BACKEND_DIR / 'data' / 'coworker.db'), 'seed'),
     ],
     hiddenimports=[
         # uvicorn
@@ -53,6 +55,8 @@ a = Analysis(
         'app.routers.chat',
         'app.routers.sessions',
         'app.routers.memory',
+        'app.routers.app_settings',
+        'app.services.settings_service',
         'app.agents.reader',
         'app.agents.sub_agent',
         'app.agents.presets.coder',

@@ -106,14 +106,26 @@ echo "[4/4] Electron 패키징..."
 cd "$BUILD_DIR"
 
 # 이전 빌드 DMG 마운트 잔여물 정리
-for vol in /Volumes/Coworker /Volumes/Coworker\ *; do
+echo "  → 기존 Coworker 볼륨 마운트 해제..."
+while IFS= read -r vol; do
+  [ -z "$vol" ] && continue
+  echo "     해제 중: $vol"
+  hdiutil detach "$vol" -force 2>/dev/null || true
+done < <(hdiutil info 2>/dev/null | grep '/Volumes/Coworker' | awk '{print $NF}')
+# glob 방식 추가 보완
+for vol in "/Volumes/Coworker" /Volumes/Coworker\ *; do
   if [ -d "$vol" ]; then
-    echo "  → 기존 마운트 해제: $vol"
+    echo "     해제 중: $vol"
     hdiutil detach "$vol" -force 2>/dev/null || true
   fi
 done
+sleep 1
 
 npm install
+
+# 이전 빌드 결과물 정리 (충돌 방지)
+echo "  → 이전 dist/ 정리..."
+rm -rf "$BUILD_DIR/dist"
 
 if [ "$TARGET" = "--mac" ]; then
   echo "  → macOS DMG 빌드 중..."

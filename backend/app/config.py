@@ -10,20 +10,19 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # Claude CLI
-    claude_cli_path: str = "claude"
+    # CLI 경로
+    claude_cli_path: str = str(Path.home() / ".local" / "bin" / "claude")
+    gemini_cli_path: str = "/usr/local/bin/gemini"
     claude_cli_timeout: int = 120
 
     # 모델 설정 (빈 문자열 = CLI 기본값 사용)
-    solo_model: str = ""   # 분류 + Solo 응답용 (예: claude-haiku-4-5-20251001)
-    team_model: str = ""   # Team 에이전트 + 통합용 (예: claude-sonnet-4-6)
 
     # Agent
     max_sub_agents: int = 5
 
     # 분류: Team 모드 트리거 헤더 (메시지가 이 값으로 시작하면 team 모드)
     # 빈 값이면 헤더 트리거 비활성 (예: (팀프로젝트))
-    team_trigger_header: str = ""
+    team_trigger_header: str = "(팀모드)"
 
     # 세션 내 커스텀 역할 정의 트리거 (예: "(역할추가) Friend: 당신은 친근한 친구입니다.")
     role_add_trigger: str = "(역할추가)"

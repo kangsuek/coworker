@@ -10,8 +10,10 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
-from app.models.db import engine, run_pragmas
+from app.models.db import async_session, engine, run_pragmas
 from app.routers import chat, memory, sessions
+from app.routers.app_settings import router as settings_router
+from app.services import settings_service
 from app.services.upload_service import UPLOAD_DIR, cleanup_expired_uploads
 
 logging.basicConfig(
@@ -40,6 +42,12 @@ async def _periodic_cleanup() -> None:
 async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         await run_pragmas(conn)
+        # app_settings 테이블 자동 생성 (없으면)
+        from app.models.db import Base
+        await conn.run_sync(Base.metadata.create_all)
+    # DB에서 런타임 설정 로드
+    async with async_session() as db:
+        await settings_service.load(db)
     cleanup_task = asyncio.create_task(_periodic_cleanup())
     yield
     cleanup_task.cancel()
@@ -63,6 +71,7 @@ app.add_middleware(
 app.include_router(chat.router, prefix="/api")
 app.include_router(sessions.router, prefix="/api")
 app.include_router(memory.router, prefix="/api")
+app.include_router(settings_router, prefix="/api")
 
 
 @app.get("/api/health")

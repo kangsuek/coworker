@@ -13,6 +13,7 @@ from pydantic import ValidationError
 
 from app.config import settings
 from app.models.schemas import AgentPlan, ClassificationResult, LLMClassificationResponse
+from app.services import settings_service
 from app.services.llm import get_provider
 from app.services.llm.base import LLMProvider
 
@@ -33,12 +34,24 @@ def _parse_explicit_role(task: str) -> tuple[str, str | None]:
     return task, None
 
 
-def _role_for_task(task: str) -> str:
-    """태스크 텍스트에서 적합한 Agent 역할 결정.
+def _get_runtime_role_map() -> list[tuple[str, list[str]]]:
+    """런타임 설정에서 역할 키워드 맵 반환."""
+    ordered = [
+        ("Researcher", settings_service.get("role_researcher_keywords") or settings.role_researcher_keywords),
+        ("Writer",     settings_service.get("role_writer_keywords") or settings.role_writer_keywords),
+        ("Planner",    settings_service.get("role_planner_keywords") or settings.role_planner_keywords),
+        ("Coder",      settings_service.get("role_coder_keywords") or settings.role_coder_keywords),
+        ("Reviewer",   settings_service.get("role_reviewer_keywords") or settings.role_reviewer_keywords),
+    ]
+    return [
+        (role, [kw.strip() for kw in kws.split(",") if kw.strip()])
+        for role, kws in ordered
+    ]
 
-    순서 및 키워드는 settings.role_map에서 결정 (환경변수로 재정의 가능).
-    """
-    for role, keywords in settings.role_map:
+
+def _role_for_task(task: str) -> str:
+    """태스크 텍스트에서 적합한 Agent 역할 결정."""
+    for role, keywords in _get_runtime_role_map():
         if any(kw in task for kw in keywords):
             return role
     return "Researcher"
@@ -56,11 +69,11 @@ async def _classify_with_llm(
 
     # 가용한 역할 목록 및 설명 (기본 역할 + 세션 커스텀 역할)
     base_roles = [
-        ("Researcher", settings.role_researcher_keywords),
-        ("Writer", settings.role_writer_keywords),
-        ("Planner", settings.role_planner_keywords),
-        ("Coder", settings.role_coder_keywords),
-        ("Reviewer", settings.role_reviewer_keywords),
+        ("Researcher", settings_service.get("role_researcher_keywords") or settings.role_researcher_keywords),
+        ("Writer",     settings_service.get("role_writer_keywords") or settings.role_writer_keywords),
+        ("Planner",    settings_service.get("role_planner_keywords") or settings.role_planner_keywords),
+        ("Coder",      settings_service.get("role_coder_keywords") or settings.role_coder_keywords),
+        ("Reviewer",   settings_service.get("role_reviewer_keywords") or settings.role_reviewer_keywords),
     ]
     role_info_lines = [f"- {role}: {keywords}" for role, keywords in base_roles]
     if custom_roles:
@@ -155,7 +168,7 @@ async def classify_message(
     1. 규칙 기반으로 Solo/Team 결정 및 1차 태스크 분할.
     2. Team 모드일 경우 LLM을 통해 역할(Role) 및 의존성(Dependency) 강화.
     """
-    header = settings.team_trigger_header.strip()
+    header = (settings_service.get("team_trigger_header") or settings.team_trigger_header).strip()
 
     if not (header and user_message.startswith(header)):
         return ClassificationResult(

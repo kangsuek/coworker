@@ -8,6 +8,7 @@ import argparse
 import asyncio
 import os
 import platform
+import shutil
 import sys
 from pathlib import Path
 
@@ -67,9 +68,16 @@ def main() -> None:
     data_dir = get_app_data_dir()
     data_dir.mkdir(parents=True, exist_ok=True)
 
+    # 첫 실행 시: 번들에 포함된 시드 DB를 사용자 데이터 디렉토리로 복사
+    user_db = data_dir / 'coworker.db'
+    if not user_db.exists():
+        seed_db = bundle_dir / 'seed' / 'coworker.db'
+        if seed_db.exists():
+            shutil.copy2(str(seed_db), str(user_db))
+
     setup_paths(bundle_dir, data_dir, args.port)
 
-    # DB 초기화
+    # DB 초기화 (신규 테이블 추가 시 자동 반영)
     asyncio.run(init_db())
 
     # uvicorn으로 FastAPI 앱 실행

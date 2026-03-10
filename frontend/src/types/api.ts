@@ -99,3 +99,8 @@ export interface UploadedFile {
 export interface UploadResponse {
   uploaded: UploadedFile[]
 }
+
+export interface AppSettingsResponse {
+  settings: Record<string, string>
+  defaults: Record<string, string>
+}

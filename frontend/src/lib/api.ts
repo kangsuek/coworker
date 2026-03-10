@@ -1,5 +1,6 @@
 import type {
   AgentMessagesResponse,
+  AppSettingsResponse,
   ChatRequest,
   ChatResponse,
   Memory,
@@ -57,6 +58,16 @@ async function del(path: string): Promise<void> {
   if (!res.ok) throw new Error(`DELETE ${path} failed: ${res.status}`)
 }
 
+async function put<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetchWithRetry(`${API_BASE}${path}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) throw new Error(`PUT ${path} failed: ${res.status}`)
+  return res.json()
+}
+
 export const api = {
   chat: (req: ChatRequest) => post<ChatResponse>('/chat', req),
   getRunStatus: (runId: string) => get<RunStatus>(`/runs/${runId}`),
@@ -72,6 +83,10 @@ export const api = {
   createMemory: (content: string) => post<Memory>('/memories', { content }),
   deleteMemory: (id: string) => del(`/memories/${id}`),
   getCliStatus: () => get<{ active_cli_count: number }>('/cli/status'),
+  getSettings: () => get<AppSettingsResponse>('/settings'),
+  updateSettings: (settings: Record<string, string>) =>
+    put<AppSettingsResponse>('/settings', { settings }),
+  resetSettings: () => del('/settings'),
   uploadFiles: async (files: File[]): Promise<UploadResponse> => {
     const form = new FormData()
     files.forEach((f) => form.append('files', f))

@@ -4,6 +4,9 @@ import tailwindcss from '@tailwindcss/vite'
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  build: {
+    chunkSizeWarningLimit: 1000, // Electron 로컬 서빙 — 네트워크 성능 무관
+  },
   server: {
     port: 5173,
     proxy: {

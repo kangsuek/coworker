@@ -20,6 +20,7 @@ from collections.abc import Callable, Coroutine
 from typing import Any
 
 from app.config import settings
+from app.services import settings_service
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +56,8 @@ def _call_claude_sync(
 
     file_paths: list[str] = kwargs.get("file_paths") or []
 
-    cmd = [settings.claude_cli_path, "-p", user_message, "--system-prompt", system_prompt]
+    cli_path = settings_service.get("claude_cli_path") or settings.claude_cli_path
+    cmd = [cli_path, "-p", user_message, "--system-prompt", system_prompt]
     if model:
         cmd.extend(["--model", model])
     for fp in file_paths:
@@ -69,6 +71,9 @@ def _call_claude_sync(
 
     # CLAUDECODE 환경변수 제거: Claude Code 세션 내에서 중첩 실행 방지
     child_env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
+    # PATH 보강: 패키징 앱은 PATH=/usr/bin:/bin만 제공 — node/cli 도구 경로 추가
+    _extra = "/usr/local/bin:/opt/homebrew/bin:/opt/homebrew/sbin"
+    child_env["PATH"] = _extra + ":" + child_env.get("PATH", "")
 
     # Popen 직전 취소 여부 확인
     if run_id and run_id in _cancelled_runs:
