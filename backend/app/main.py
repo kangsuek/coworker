@@ -8,12 +8,16 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy import select, update
 
 from app.config import settings
 from app.models.db import async_session, engine, run_pragmas
+from app.models.db import Run
+from app.models.schemas import ACTIVE_RUN_STATUSES
 from app.routers import chat, memory, sessions
 from app.routers.app_settings import router as settings_router
 from app.services import settings_service
+from app.services.cli_service import cancel_current
 from app.services.upload_service import UPLOAD_DIR, cleanup_expired_uploads
 
 logging.basicConfig(
@@ -51,6 +55,25 @@ async def lifespan(app: FastAPI):
     cleanup_task = asyncio.create_task(_periodic_cleanup())
     yield
     cleanup_task.cancel()
+    # 서버 종료 시 실행 중인 모든 run 취소 및 상태 정리 (BUG-SHUTDOWN-01)
+    try:
+        async with async_session() as db:
+            result = await db.execute(
+                select(Run.id).where(Run.status.in_(ACTIVE_RUN_STATUSES))
+            )
+            active_run_ids = [row[0] for row in result.all()]
+            if active_run_ids:
+                logger.info("서버 종료: 활성 run %d개 취소 처리", len(active_run_ids))
+                for run_id in active_run_ids:
+                    await cancel_current(run_id=run_id)
+                await db.execute(
+                    update(Run)
+                    .where(Run.id.in_(active_run_ids))
+                    .values(status="cancelled")
+                )
+                await db.commit()
+    except Exception:
+        logger.exception("서버 종료 시 활성 run 취소 중 오류")
     await engine.dispose()
 
 

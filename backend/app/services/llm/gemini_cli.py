@@ -35,7 +35,7 @@ def _call_gemini_sync(
     run_id: str | None = kwargs.get("run_id")
     proc_key = run_id or cli_service._UNTRACKED_KEY
     timeout: int = kwargs.get("timeout", settings.claude_cli_timeout)
-    model: str = kwargs.get("model", "")
+    model: str = (kwargs.get("model") or "").strip()
 
     # Gemini CLI 호출 명령어 구성 (stream-json 실시간 스트리밍)
     # SEC-04: 명시적 구분자로 시스템/사용자 영역 분리 (프롬프트 인젝션 완화)
@@ -78,7 +78,8 @@ def _call_gemini_sync(
     )
 
     # 활성 프로세스 등록 (run_id 키로 분리)
-    cli_service._active_procs.setdefault(proc_key, []).append(proc)
+    with cli_service._active_procs_lock:
+        cli_service._active_procs.setdefault(proc_key, []).append(proc)
 
     if run_id and run_id in cli_service._cancelled_runs:
         try:
@@ -86,9 +87,10 @@ def _call_gemini_sync(
         except (ProcessLookupError, OSError):
             pass
         proc.wait()
-        procs = cli_service._active_procs.get(proc_key, [])
-        if proc in procs:
-            procs.remove(proc)
+        with cli_service._active_procs_lock:
+            procs = cli_service._active_procs.get(proc_key, [])
+            if proc in procs:
+                procs.remove(proc)
         raise RuntimeError(f"Run {run_id} cancelled during startup")
 
     # NDJSON 파싱: delta 청크 누적 → on_line 실시간 전달, 오류 보고용 raw 보관
@@ -99,6 +101,7 @@ def _call_gemini_sync(
             # 루프 내 취소 확인
             if run_id and run_id in cli_service._cancelled_runs:
                 logger.info("Gemini CLI 실행 중 중단: run_id=%s", run_id)
+                on_line = None  # 취소 후 잔여 버퍼 데이터 콜백 차단
                 try:
                     os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
                 except (ProcessLookupError, OSError):
@@ -114,6 +117,7 @@ def _call_gemini_sync(
             try:
                 obj = json.loads(stripped)
             except json.JSONDecodeError:
+                logger.debug("Gemini CLI NDJSON 파싱 실패 (무시): run_id=%s, line=%r", run_id, stripped[:120])
                 continue
 
             t = obj.get("type")
@@ -122,7 +126,10 @@ def _call_gemini_sync(
                 if chunk:
                     chunks.append(chunk)
                     if on_line:
-                        on_line(chunk)
+                        try:
+                            on_line(chunk)
+                        except Exception:
+                            logger.debug("on_line 콜백 예외 무시 (스트림 유지): run_id=%s", run_id)
 
         proc.wait(timeout=timeout)
     except subprocess.TimeoutExpired:
@@ -141,11 +148,12 @@ def _call_gemini_sync(
         proc.wait()
         raise
     finally:
-        procs = cli_service._active_procs.get(proc_key, [])
-        if proc in procs:
-            procs.remove(proc)
-        if not procs and proc_key in cli_service._active_procs:
-            del cli_service._active_procs[proc_key]
+        with cli_service._active_procs_lock:
+            procs = cli_service._active_procs.get(proc_key, [])
+            if proc in procs:
+                procs.remove(proc)
+            if not procs and proc_key in cli_service._active_procs:
+                del cli_service._active_procs[proc_key]
 
     if run_id and run_id in cli_service._cancelled_runs:
         raise RuntimeError(f"Run {run_id} was cancelled")

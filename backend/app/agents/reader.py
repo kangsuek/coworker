@@ -229,7 +229,7 @@ class ReaderAgent:
                     history = await get_recent_messages(
                         self.db, session_id, limit=_HISTORY_MSG_LIMIT, exclude_id=current_msg_id
                     )
-                    model_to_use = self.session_model or self.session_model or ""
+                    model_to_use = self.session_model or ""
                     _MEMORY_GEN_PROMPT = (
                         "사용자의 요청을 처리하여 전역 메모리에 저장할 내용을 생성하세요. "
                         "저장할 내용만 간결하게 출력하세요. 설명, 인사, 확인 문구는 절대 포함하지 마세요."
@@ -443,7 +443,7 @@ class ReaderAgent:
         memories = getattr(self, "memories", [])
         enriched_message = _inject_text_files(user_message, text_files)
         prompt = _today_context() + _memory_context(memories) + _build_conversation_prompt(enriched_message, history or [])
-        model_to_use = self.session_model or self.session_model or ""
+        model_to_use = self.session_model or ""
 
         if not run_id:
             return await self.llm_provider.stream_generate(
@@ -610,7 +610,7 @@ class ReaderAgent:
                 )
 
                 try:
-                    model_to_use = self.session_model or self.session_model or ""
+                    model_to_use = self.session_model or ""
                     result = await agent.execute(full_task, full_context, on_line, model=model_to_use, run_id=run_id, file_paths=native_files)
                 except Exception:
                     await flusher.stop()
@@ -704,7 +704,7 @@ class ReaderAgent:
         parts = [f"[{name} 결과]:\n{result}" for name, result in results.items()]
         combined = "\n\n".join(parts)
         prompt = f"{_today_context()}사용자 요청: {user_message}\n\n{combined}"
-        model_to_use = self.session_model or self.session_model or ""
+        model_to_use = self.session_model or ""
         return await self.llm_provider.stream_generate(
             _INTEGRATE_SYSTEM_PROMPT,
             prompt,
@@ -727,7 +727,7 @@ class ReaderAgent:
 
     async def _summarize_for_context(self, agent_name: str, content: str, run_id: str | None = None) -> str:
         """긴 결과물을 다음 Agent에 전달할 수 있도록 CLI 호출로 요약."""
-        model_to_use = self.session_model or self.session_model or ""
+        model_to_use = self.session_model or ""
         return await self.llm_provider.stream_generate(
             _SUMMARIZE_SYSTEM_PROMPT,
             f"다음은 {agent_name}의 작업 결과입니다. 요약해주세요:\n\n{content}",
@@ -738,7 +738,7 @@ class ReaderAgent:
 
     async def _summarize_history(self, history_text: str, run_id: str | None = None) -> str:
         """긴 대화 이력을 요약하여 핵심 맥락만 추출."""
-        model_to_use = self.session_model or self.session_model or ""
+        model_to_use = self.session_model or ""
         return await self.llm_provider.stream_generate(
             _SUMMARIZE_HISTORY_SYSTEM_PROMPT,
             f"다음 대화 이력을 요약해주세요:\n\n{history_text}",

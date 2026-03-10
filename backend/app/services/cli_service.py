@@ -16,6 +16,7 @@ import os
 import queue
 import signal
 import subprocess
+import threading
 from collections.abc import Callable, Coroutine
 from typing import Any
 
@@ -25,6 +26,7 @@ from app.services import settings_service
 logger = logging.getLogger(__name__)
 
 _active_procs: dict[str, list[subprocess.Popen]] = {}
+_active_procs_lock = threading.Lock()  # _active_procs 다중 스레드 접근 보호
 # 특정 run_id의 취소 상태를 추적
 _cancelled_runs: set[str] = set()
 
@@ -52,7 +54,7 @@ def _call_claude_sync(
     run_id: str | None = kwargs.get("run_id")
     output_json: bool = kwargs.get("output_json", False)
     timeout: int = kwargs.get("timeout", settings.claude_cli_timeout)
-    model: str = kwargs.get("model", "")
+    model: str = (kwargs.get("model") or "").strip()
 
     file_paths: list[str] = kwargs.get("file_paths") or []
 
@@ -93,7 +95,8 @@ def _call_claude_sync(
 
     # 활성 프로세스 등록 (run_id 키로 분리)
     proc_key = run_id or _UNTRACKED_KEY
-    _active_procs.setdefault(proc_key, []).append(proc)
+    with _active_procs_lock:
+        _active_procs.setdefault(proc_key, []).append(proc)
 
     # Popen 직후 취소 여부 재확인 (Race condition 방어)
     if run_id and run_id in _cancelled_runs:
@@ -102,19 +105,22 @@ def _call_claude_sync(
         except (ProcessLookupError, OSError):
             pass
         proc.wait()
-        procs = _active_procs.get(proc_key, [])
-        if proc in procs:
-            procs.remove(proc)
+        with _active_procs_lock:
+            procs = _active_procs.get(proc_key, [])
+            if proc in procs:
+                procs.remove(proc)
         raise RuntimeError(f"Run {run_id} cancelled during startup")
 
     # output_json=True: 줄 누적 후 반환 / output_json=False: NDJSON 파싱 (오류 보고용 raw 보관)
     collected: list[str] = []
-    final_result = ""  # stream-json 모드 전용: result 이벤트에서 추출
+    final_result = ""   # stream-json 모드 전용: result 이벤트에서 추출
+    chunks: list[str] = []  # delta 청크 누적 (result 이벤트 파싱 실패 시 폴백)
     try:
         for line in proc.stdout:
             # 루프 내에서 취소 여부 수시 확인
             if run_id and run_id in _cancelled_runs:
                 logger.info("Claude CLI 실행 중 중단: run_id=%s", run_id)
+                on_line = None  # 취소 후 잔여 버퍼 데이터 콜백 차단
                 try:
                     os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
                 except (ProcessLookupError, OSError):
@@ -135,6 +141,7 @@ def _call_claude_sync(
                 try:
                     obj = json.loads(stripped)
                 except json.JSONDecodeError:
+                    logger.debug("Claude CLI NDJSON 파싱 실패 (무시): run_id=%s, line=%r", run_id, stripped[:120])
                     continue
 
                 t = obj.get("type")
@@ -144,8 +151,13 @@ def _call_claude_sync(
                         delta = ev.get("delta", {})
                         if delta.get("type") == "text_delta":
                             chunk = delta.get("text", "")
-                            if chunk and on_line:
-                                on_line(chunk)
+                            if chunk:
+                                chunks.append(chunk)
+                                if on_line:
+                                    try:
+                                        on_line(chunk)
+                                    except Exception:
+                                        logger.debug("on_line 콜백 예외 무시 (스트림 유지): run_id=%s", run_id)
                 elif t == "result" and obj.get("subtype") == "success":
                     final_result = obj.get("result", "")
 
@@ -167,11 +179,12 @@ def _call_claude_sync(
         proc.wait()
         raise
     finally:
-        procs = _active_procs.get(proc_key, [])
-        if proc in procs:
-            procs.remove(proc)
-        if not procs and proc_key in _active_procs:
-            del _active_procs[proc_key]
+        with _active_procs_lock:
+            procs = _active_procs.get(proc_key, [])
+            if proc in procs:
+                procs.remove(proc)
+            if not procs and proc_key in _active_procs:
+                del _active_procs[proc_key]
 
     # 취소로 인한 종료인 경우 예외 발생
     if run_id and run_id in _cancelled_runs:
@@ -181,11 +194,21 @@ def _call_claude_sync(
         logger.error("Claude CLI 비정상 종료: rc=%d, output_lines=%d", proc.returncode, len(collected))
         raise RuntimeError(f"Claude CLI error (rc={proc.returncode}): {''.join(collected)}")
 
-    logger.info("Claude CLI 완료: rc=%d, output_lines=%d", proc.returncode, len(collected))
+    logger.info(
+        "Claude CLI 완료: rc=%d, output_lines=%d, final_result_len=%d, chunks=%d",
+        proc.returncode, len(collected), len(final_result), len(chunks),
+    )
+    # 진단용: final_result/chunks 모두 비어 있으면 마지막 20줄 로깅
+    if not output_json and not final_result and not chunks:
+        sample = collected[-20:] if len(collected) > 20 else collected
+        logger.warning("Claude CLI 응답 비어 있음. 마지막 출력:\n%s", "".join(sample))
 
     if output_json:
         return "".join(collected)
-    return final_result
+    # final_result이 없으면 delta 청크 누적값 폴백 (Claude CLI 출력 포맷 변경 대응)
+    if not final_result and chunks:
+        logger.warning("Claude CLI result 이벤트 없음, delta 청크 누적값으로 폴백: run_id=%s, chunks=%d", run_id, len(chunks))
+    return final_result or "".join(chunks)
 
 
 async def call_claude_streaming(
@@ -216,7 +239,8 @@ async def cancel_current(run_id: str | None = None):
     """
     if run_id:
         _cancelled_runs.add(run_id)
-        procs = list(_active_procs.get(run_id, []))
+        with _active_procs_lock:
+            procs = list(_active_procs.get(run_id, []))
         if not procs:
             return
         logger.info("Claude CLI 취소 요청 (단일 run): run_id=%s, count=%d", run_id, len(procs))
@@ -229,7 +253,8 @@ async def cancel_current(run_id: str | None = None):
         return
 
     # run_id=None: 전체 종료
-    all_procs = [p for procs in _active_procs.values() for p in procs]
+    with _active_procs_lock:
+        all_procs = [p for procs in _active_procs.values() for p in procs]
     if not all_procs:
         return
 
@@ -244,7 +269,8 @@ async def cancel_current(run_id: str | None = None):
 
 def get_active_cli_count() -> int:
     """현재 실행 중인 CLI 프로세스 수 반환."""
-    return sum(len(procs) for procs in _active_procs.values())
+    with _active_procs_lock:
+        return sum(len(procs) for procs in _active_procs.values())
 
 
 class LineBufferFlusher:
