@@ -1,4 +1,5 @@
-import { Check, Loader2, X, CircleDot } from 'lucide-react'
+import { useRef } from 'react'
+import { Check, Loader2, X, CircleDot, FileText, FileDown } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import rehypeHighlight from 'rehype-highlight'
 import remarkGfm from 'remark-gfm'
@@ -22,9 +23,72 @@ function formatTime(isoString: string): string {
   return d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })
 }
 
+function safeFilename(name: string): string {
+  return name.replace(/[^a-zA-Z0-9가-힣_-]/g, '_')
+}
+
 export default function AgentMessageCard({ message }: Props) {
+  const contentRef = useRef<HTMLDivElement>(null)
   const roleColor = ROLE_COLORS[message.role_preset] ?? 'bg-zinc-100 text-zinc-600 border-zinc-200 dark:bg-zinc-800/50 dark:text-zinc-400 dark:border-zinc-700'
   const isWorking = message.status === 'working'
+  const hasContent = Boolean(message.content)
+
+  const handleDownloadMd = () => {
+    const blob = new Blob([message.content], { type: 'text/markdown;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${safeFilename(message.sender)}.md`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const handleDownloadPdf = () => {
+    const renderedHtml = contentRef.current?.innerHTML ?? ''
+    const win = window.open('', '_blank')
+    if (!win) return
+    win.document.write(`<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <title>${message.sender}</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans KR', sans-serif; padding: 2.5rem; max-width: 800px; margin: 0 auto; color: #1a1a1a; line-height: 1.7; font-size: 14px; }
+    h1 { font-size: 1.5rem; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+    h2 { font-size: 1.2rem; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+    h3 { font-size: 1rem; margin-top: 1rem; margin-bottom: 0.4rem; }
+    p { margin: 0.5rem 0; }
+    pre { background: #f4f4f4; padding: 1rem; border-radius: 6px; overflow-x: auto; font-size: 12px; margin: 0.75rem 0; }
+    code { font-family: 'Courier New', Consolas, monospace; font-size: 12px; background: #f0f0f0; padding: 0.1em 0.35em; border-radius: 3px; }
+    pre code { background: transparent; padding: 0; }
+    ul, ol { padding-left: 1.5rem; margin: 0.5rem 0; }
+    li { margin: 0.25rem 0; }
+    table { border-collapse: collapse; width: 100%; margin: 0.75rem 0; font-size: 13px; }
+    th, td { border: 1px solid #ddd; padding: 7px 12px; text-align: left; }
+    th { background: #f4f4f4; font-weight: 600; }
+    blockquote { border-left: 4px solid #ccc; margin: 0.75rem 0; padding: 0.25rem 1rem; color: #555; }
+    hr { border: none; border-top: 1px solid #e0e0e0; margin: 1rem 0; }
+    a { color: #0066cc; word-break: break-all; }
+    strong { font-weight: 600; }
+    .agent-header { display: flex; align-items: center; gap: 8px; border-bottom: 2px solid #e0e0e0; padding-bottom: 0.75rem; margin-bottom: 1.5rem; }
+    .agent-role { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 4px; border: 1px solid #ccc; background: #f4f4f4; }
+    .agent-name { font-size: 1rem; font-weight: 600; color: #333; }
+    .agent-time { font-size: 11px; color: #999; margin-left: auto; }
+    @media print { body { padding: 1rem; } }
+  </style>
+</head>
+<body>
+  <div class="agent-header">
+    <span class="agent-role">${message.role_preset}</span>
+    <span class="agent-name">${message.sender}</span>
+    <span class="agent-time">${formatTime(message.created_at)}</span>
+  </div>
+  ${renderedHtml}
+  <script>window.onload = () => { window.print() }<\/script>
+</body>
+</html>`)
+    win.document.close()
+  }
 
   return (
     <div className="rounded-xl border p-4 transition-all shadow-sm bg-white border-zinc-200 dark:bg-zinc-900/40 dark:border-zinc-800/80 mb-4">
@@ -38,8 +102,26 @@ export default function AgentMessageCard({ message }: Props) {
           </span>
         </div>
         <div className="flex items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400 font-medium">
+          {hasContent && (
+            <>
+              <button
+                onClick={handleDownloadMd}
+                title="Markdown 다운로드"
+                className="p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 transition-colors"
+              >
+                <FileText size={14} />
+              </button>
+              <button
+                onClick={handleDownloadPdf}
+                title="PDF 저장 (인쇄)"
+                className="p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 transition-colors"
+              >
+                <FileDown size={14} />
+              </button>
+            </>
+          )}
           {formatTime(message.created_at)}
-          
+
           {message.status === 'done' && (
             <div className="bg-emerald-500 rounded text-zinc-50 dark:text-zinc-950 p-0.5" title="완료">
               <Check size={12} strokeWidth={3} />
@@ -66,6 +148,7 @@ export default function AgentMessageCard({ message }: Props) {
       <div className="text-[13px] leading-relaxed text-zinc-600 dark:text-zinc-300">
         {message.content ? (
           <div
+            ref={contentRef}
             className="max-h-96 overflow-y-auto scrollbar-hide max-w-none
               [&_p]:mb-2 [&_p:last-child]:mb-0
               [&_ul]:list-disc [&_ul]:pl-4 [&_ul]:mb-2

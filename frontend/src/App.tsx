@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useState } from 'react'
-import { ChevronDown, Menu, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { ChevronDown, Menu, PanelLeftClose, PanelLeftOpen, Settings } from 'lucide-react'
 
 import AgentChannel from './components/AgentChannel'
 import ErrorBoundary from './components/ErrorBoundary'
 import SessionList from './components/SessionList'
+import SettingsModal from './components/Settings'
 import UserChannel from './components/UserChannel'
 import { useMemory } from './hooks/useMemory'
 import { useRunSSE } from './hooks/useRunSSE'
@@ -60,12 +61,15 @@ function App() {
   
   const [currentMode, setCurrentMode] = useState<'solo' | 'team' | null>(null)
   const [currentRunId, setCurrentRunId] = useState<string | null>(null)
+  // 세션 전환 시 진행 중인 runId를 세션별로 보존 (세션 ID → runId)
+  const sessionRunIdRef = useRef<Map<string, string>>(new Map())
   const [historicalAgentMessages, setHistoricalAgentMessages] = useState<AgentMessage[]>([])
   const session = useSession()
   const { memories, addMemory, removeMemory, refreshMemories } = useMemory()
 
   const [llmProvider, setLlmProvider] = useState('gemini-cli')
   const [llmModel, setLlmModel] = useState('gemini-3-flash-preview')
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false)
 
   // BUG-M02: 렌더 내 setState 제거 → useEffect로 이전 (React 규칙 준수)
   useEffect(() => {
@@ -155,10 +159,33 @@ function App() {
   }
 
   const handleSwitchSession = async (id: string) => {
+    // 현재 세션에서 진행 중인 runId가 있으면 저장 (나중에 돌아올 때 복원)
+    if (currentRunId && session.currentSession?.id) {
+      sessionRunIdRef.current.set(session.currentSession.id, currentRunId)
+    }
     setCurrentRunId(null)
     setCurrentMode(null)
     setHistoricalAgentMessages([])
     const detail = await session.switchSession(id)
+
+    // 이전에 이 세션에서 진행 중이던 run이 있으면 복원 시도
+    const savedRunId = sessionRunIdRef.current.get(id)
+    if (savedRunId) {
+      sessionRunIdRef.current.delete(id)
+      try {
+        const runStatus = await api.getRunStatus(savedRunId)
+        const terminalStates = ['done', 'error', 'cancelled']
+        if (!terminalStates.includes(runStatus.status)) {
+          // 아직 진행 중 → runId 복원해서 SSE 재연결
+          setCurrentRunId(savedRunId)
+          setCurrentMode(runStatus.mode)
+        }
+        // 이미 완료된 경우: switchSession이 DB에서 최신 메시지를 로드했으므로 별도 처리 불필요
+      } catch {
+        // run 조회 실패 시 무시
+      }
+    }
+
     // 마지막 팀 모드 실행의 에이전트 메시지 복원
     const lastTeamMsg = detail.messages.slice().reverse().find(
       (m) => m.role === 'reader' && m.mode === 'team' && m.run_id,
@@ -194,6 +221,7 @@ function App() {
   const isDarkMode = theme === 'dark'
 
   return (
+    <>
     <div className={`flex h-screen w-full overflow-hidden transition-colors duration-300 ${isDarkMode ? 'bg-zinc-950 text-zinc-100' : 'bg-zinc-50 text-zinc-900'} font-sans`}>
       {/* macOS hiddenInset 타이틀바: 트래픽 라이트 전용 드래그 영역 (fixed, 항상 최상단) */}
       <div
@@ -287,6 +315,13 @@ function App() {
             </div>
             
             <button
+              onClick={() => setIsSettingsOpen(true)}
+              className={`p-1.5 rounded-lg transition-colors ${isDarkMode ? 'hover:bg-zinc-800 text-zinc-400' : 'hover:bg-zinc-100 text-zinc-600'}`}
+              title="환경설정"
+            >
+              <Settings size={18} />
+            </button>
+            <button
               onClick={() => setIsAgentPanelOpen(!isAgentPanelOpen)}
               className={`p-1.5 rounded-lg transition-colors ml-1 ${isDarkMode ? 'hover:bg-zinc-800 text-zinc-400' : 'hover:bg-zinc-100 text-zinc-600'}`}
               title={isAgentPanelOpen ? "Agent Channel 숨기기" : "Agent Channel 보기"}
@@ -332,6 +367,11 @@ function App() {
       </div>
 
     </div>
+
+    {isSettingsOpen && (
+      <SettingsModal theme={theme} onClose={() => setIsSettingsOpen(false)} />
+    )}
+    </>
   )
 }
 

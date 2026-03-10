@@ -53,19 +53,55 @@ export default function AgentChannel({
     }
   }, [])
 
-  const handleExportText = () => {
-    const lines = messages.map((m) => `[${m.sender}]\n${m.content}`)
-    const blob = new Blob([lines.join('\n\n---\n\n')], { type: 'text/plain;charset=utf-8' })
-    downloadBlob(blob, 'agent-messages.txt')
-    showToast('TXT 파일이 다운로드되었습니다')
+  const handleExportMd = () => {
+    const lines = messages.map((m) => `# ${m.sender} (${m.role_preset})\n\n${m.content}`)
+    const blob = new Blob([lines.join('\n\n---\n\n')], { type: 'text/markdown;charset=utf-8' })
+    downloadBlob(blob, 'agent-messages.md')
+    showToast('MD 파일이 다운로드되었습니다')
   }
 
-  const handleExportJson = () => {
-    const blob = new Blob([JSON.stringify(messages, null, 2)], {
-      type: 'application/json;charset=utf-8',
-    })
-    downloadBlob(blob, 'agent-messages.json')
-    showToast('JSON 파일이 다운로드되었습니다')
+  const handleExportPdf = () => {
+    const sections = messages.map((m) => `
+      <section style="margin-bottom:2.5rem; padding-bottom:2rem; border-bottom:1px solid #e0e0e0;">
+        <div style="display:flex; align-items:center; gap:8px; margin-bottom:1rem;">
+          <span style="font-size:11px; font-weight:700; padding:2px 8px; border-radius:4px; border:1px solid #ccc; background:#f4f4f4;">${m.role_preset}</span>
+          <span style="font-size:1rem; font-weight:600; color:#333;">${m.sender}</span>
+        </div>
+        <div style="font-size:14px; line-height:1.7; color:#1a1a1a; white-space:pre-wrap;">${m.content.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
+      </section>
+    `).join('')
+
+    const win = window.open('', '_blank')
+    if (!win) return
+    win.document.write(`<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <title>Agent Messages</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans KR', sans-serif; padding: 2.5rem; max-width: 800px; margin: 0 auto; color: #1a1a1a; }
+    h1 { font-size: 1.5rem; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+    h2 { font-size: 1.2rem; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+    h3 { font-size: 1rem; margin-top: 1rem; margin-bottom: 0.4rem; }
+    pre { background: #f4f4f4; padding: 1rem; border-radius: 6px; font-size: 12px; margin: 0.75rem 0; white-space: pre-wrap; word-break: break-all; }
+    code { font-family: 'Courier New', Consolas, monospace; font-size: 12px; background: #f0f0f0; padding: 0.1em 0.35em; border-radius: 3px; }
+    ul, ol { padding-left: 1.5rem; margin: 0.5rem 0; }
+    li { margin: 0.25rem 0; }
+    table { border-collapse: collapse; width: 100%; margin: 0.75rem 0; font-size: 13px; }
+    th, td { border: 1px solid #ddd; padding: 7px 12px; text-align: left; }
+    th { background: #f4f4f4; font-weight: 600; }
+    blockquote { border-left: 4px solid #ccc; margin: 0.75rem 0; padding: 0.25rem 1rem; color: #555; }
+    .doc-title { font-size: 1.3rem; font-weight: 700; border-bottom: 2px solid #333; padding-bottom: 0.5rem; margin-bottom: 2rem; }
+    @media print { body { padding: 1rem; } }
+  </style>
+</head>
+<body>
+  <div class="doc-title">Agent Messages (${messages.length}개)</div>
+  ${sections}
+  <script>window.onload = () => { window.print() }<\/script>
+</body>
+</html>`)
+    win.document.close()
   }
 
   // 새 메시지 도착 시 자동 스크롤
@@ -97,8 +133,8 @@ export default function AgentChannel({
           <div className="flex items-center gap-3 text-xs font-bold text-zinc-500">
             {hasMessages && (
               <>
-                <button onClick={handleExportText} className="hover:text-zinc-800 dark:hover:text-zinc-200 transition-colors">TXT</button>
-                <button onClick={handleExportJson} className="hover:text-zinc-800 dark:hover:text-zinc-200 transition-colors">JSON</button>
+                <button onClick={handleExportMd} className="hover:text-zinc-800 dark:hover:text-zinc-200 transition-colors">MD</button>
+                <button onClick={handleExportPdf} className="hover:text-zinc-800 dark:hover:text-zinc-200 transition-colors">PDF</button>
               </>
             )}
           </div>

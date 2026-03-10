@@ -23,6 +23,7 @@ class SubAgent:
         on_line: Callable[[str], None] | None,
         model: str = "",
         run_id: str | None = None,
+        file_paths: list[str] | None = None,
     ) -> str:
         """설정된 LLM Provider를 통해 태스크 수행. context는 이전 Agent 결과."""
         prompt = self._build_prompt(task, context)
@@ -32,6 +33,7 @@ class SubAgent:
             on_line=on_line,
             model=model,
             run_id=run_id,
+            file_paths=file_paths,
         )
 
     def _build_prompt(self, task: str, context: str | None) -> str:

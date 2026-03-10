@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agents.presets import coder, planner, researcher, reviewer, writer
 from app.agents.sub_agent import SubAgent
 from app.config import settings
+from app.services import settings_service
 from app.models import db as models
 from app.models.schemas import AgentPlan, ClassificationResult
 from app.services.classification import classify_message
@@ -135,15 +136,19 @@ def _build_conversation_prompt(user_message: str, history: list) -> str:
     lines.append(f"[현재 질문]\n{user_message}")
     return "\n".join(lines)
 
-_AGENT_COMMON_INSTRUCTION = "\n\n" + settings.prompt_agent_common
+def _get_agent_common_instruction() -> str:
+    return "\n\n" + (settings_service.get("prompt_agent_common") or settings.prompt_agent_common)
 
-_PRESET_MAP = {
-    "Researcher": researcher.SYSTEM_PROMPT + _AGENT_COMMON_INSTRUCTION,
-    "Coder": coder.SYSTEM_PROMPT + _AGENT_COMMON_INSTRUCTION,
-    "Reviewer": reviewer.SYSTEM_PROMPT + _AGENT_COMMON_INSTRUCTION,
-    "Writer": writer.SYSTEM_PROMPT + _AGENT_COMMON_INSTRUCTION,
-    "Planner": planner.SYSTEM_PROMPT + _AGENT_COMMON_INSTRUCTION,
-}
+
+def _get_preset_map() -> dict[str, str]:
+    common = _get_agent_common_instruction()
+    return {
+        "Researcher": (settings_service.get("prompt_researcher") or researcher.SYSTEM_PROMPT) + common,
+        "Coder": (settings_service.get("prompt_coder") or coder.SYSTEM_PROMPT) + common,
+        "Reviewer": (settings_service.get("prompt_reviewer") or reviewer.SYSTEM_PROMPT) + common,
+        "Writer": (settings_service.get("prompt_writer") or writer.SYSTEM_PROMPT) + common,
+        "Planner": (settings_service.get("prompt_planner") or planner.SYSTEM_PROMPT) + common,
+    }
 
 _INTEGRATE_SYSTEM_PROMPT = (
     "당신은 여러 전문가의 작업 결과를 통합하는 조율자입니다. "
@@ -191,8 +196,8 @@ class ReaderAgent:
             self.session_model = session.llm_model if session else None
 
             # 전역 메모리 저장 트리거 감지
-            _MEMORY_TRIGGER = settings.memory_trigger  # BUG-08: 환경변수로 설정 가능
-            _team_header = settings.team_trigger_header.strip()
+            _MEMORY_TRIGGER = settings_service.get("memory_trigger") or settings.memory_trigger
+            _team_header = (settings_service.get("team_trigger_header") or settings.team_trigger_header).strip()
             # BUG-07: 팀모드 메시지에 (기억)이 포함돼도 메모리 트리거로 오인식하지 않도록 예외 처리
             _is_team_trigger = bool(_team_header and user_message.startswith(_team_header))
             if not _is_team_trigger and _MEMORY_TRIGGER in user_message:
@@ -224,7 +229,7 @@ class ReaderAgent:
                     history = await get_recent_messages(
                         self.db, session_id, limit=_HISTORY_MSG_LIMIT, exclude_id=current_msg_id
                     )
-                    model_to_use = self.session_model or settings.solo_model
+                    model_to_use = self.session_model or self.session_model or ""
                     _MEMORY_GEN_PROMPT = (
                         "사용자의 요청을 처리하여 전역 메모리에 저장할 내용을 생성하세요. "
                         "저장할 내용만 간결하게 출력하세요. 설명, 인사, 확인 문구는 절대 포함하지 마세요."
@@ -260,7 +265,7 @@ class ReaderAgent:
                 return
 
             # 커스텀 역할 정의 지시문 감지: "(역할추가) 역할명: 프롬프트"
-            trigger = settings.role_add_trigger.strip()
+            trigger = (settings_service.get("role_add_trigger") or settings.role_add_trigger).strip()
             if trigger and user_message.startswith(trigger):
                 rest = user_message[len(trigger):].strip()
                 if ":" in rest:
@@ -340,6 +345,12 @@ class ReaderAgent:
             logger.exception("process_message 실패: run_id=%s", run_id)
 
             async with self.db_lock:
+                # TypeError 등으로 SQLAlchemy 세션이 롤백 상태일 수 있으므로 먼저 롤백
+                try:
+                    await self.db.rollback()
+                except Exception:
+                    pass
+
                 # run이 삭제됐으면 (세션 삭제 등) 고아 레코드 생성을 막기 위해 즉시 반환
                 status_row = await self.db.execute(
                     sql_text("SELECT status FROM runs WHERE id = :run_id"), {"run_id": run_id}
@@ -384,11 +395,12 @@ class ReaderAgent:
             # (update_run_status에서 "cancelled" 시 정리하지 않으므로 여기서 수행)
             _cancelled_runs.discard(run_id)
 
-    # 프로바이더별 분류 전용 경량 모델 (Claude: Haiku, Gemini: Flash)
-    _CLASSIFY_MODEL: dict[str, str] = {
-        "claude-cli": settings.solo_model,        # Haiku (solo_model 설정값)
-        "gemini-cli": "gemini-3-flash-preview",   # Gemini3 Flash
-    }
+    @property
+    def _CLASSIFY_MODEL(self) -> dict[str, str]:
+        return {
+            "claude-cli": self.session_model or "",
+            "gemini-cli": self.session_model or "",
+        }
 
     async def _classify(self, user_message: str) -> ClassificationResult:
         """Solo/Team 분류.
@@ -397,7 +409,9 @@ class ReaderAgent:
         역할(Role) 및 의존성(depends_on)을 정교화한다.
         사용자가 선택한 프로바이더를 그대로 사용하여 불필요한 cold start를 방지한다.
         """
-        classify_model = self._CLASSIFY_MODEL.get(self.provider_name, settings.solo_model)
+        classify_model = self._CLASSIFY_MODEL.get(
+            self.provider_name, self.session_model or ""
+        )
         result = await classify_message(
             user_message,
             llm_provider=self.llm_provider,
@@ -429,7 +443,7 @@ class ReaderAgent:
         memories = getattr(self, "memories", [])
         enriched_message = _inject_text_files(user_message, text_files)
         prompt = _today_context() + _memory_context(memories) + _build_conversation_prompt(enriched_message, history or [])
-        model_to_use = self.session_model or settings.solo_model
+        model_to_use = self.session_model or self.session_model or ""
 
         if not run_id:
             return await self.llm_provider.stream_generate(
@@ -596,7 +610,7 @@ class ReaderAgent:
                 )
 
                 try:
-                    model_to_use = self.session_model or settings.team_model
+                    model_to_use = self.session_model or self.session_model or ""
                     result = await agent.execute(full_task, full_context, on_line, model=model_to_use, run_id=run_id, file_paths=native_files)
                 except Exception:
                     await flusher.stop()
@@ -648,7 +662,9 @@ class ReaderAgent:
         async with self.db_lock:
             await update_run_status(self.db, run_id, "integrating")
 
-        final = await self._integrate_results(enriched_message, agent_results, run_id=run_id)
+        final = await self._integrate_results(
+            enriched_message, agent_results, run_id=run_id,
+        )
         
         async with self.db_lock:
             # 통합 CLI 실행 도중 세션이 삭제됐을 수 있으므로 run 존재 여부 재확인
@@ -666,13 +682,16 @@ class ReaderAgent:
         Gemini CLI는 Google Search가 기본 활성화되어 있으므로
         Researcher에 웹 검색 활용 지침을 적용한다.
         """
+        preset_map = _get_preset_map()
+        common = _get_agent_common_instruction()
         custom_roles = getattr(self, "custom_roles", {}) or {}
         if agent_plan.role in custom_roles:
-            system_prompt = custom_roles[agent_plan.role] + _AGENT_COMMON_INSTRUCTION
+            system_prompt = custom_roles[agent_plan.role] + common
         elif agent_plan.role == "Researcher" and self.provider_name == "gemini-cli":
-            system_prompt = researcher.SYSTEM_PROMPT_WEB_SEARCH + _AGENT_COMMON_INSTRUCTION
+            researcher_web = settings_service.get("prompt_researcher_web_search") or researcher.SYSTEM_PROMPT_WEB_SEARCH
+            system_prompt = researcher_web + common
         else:
-            system_prompt = _PRESET_MAP.get(agent_plan.role, _PRESET_MAP["Researcher"])
+            system_prompt = preset_map.get(agent_plan.role, preset_map["Researcher"])
         return SubAgent(
             name=f"{agent_plan.role}-{index + 1}",
             role_preset=agent_plan.role,
@@ -685,7 +704,7 @@ class ReaderAgent:
         parts = [f"[{name} 결과]:\n{result}" for name, result in results.items()]
         combined = "\n\n".join(parts)
         prompt = f"{_today_context()}사용자 요청: {user_message}\n\n{combined}"
-        model_to_use = self.session_model or settings.team_model
+        model_to_use = self.session_model or self.session_model or ""
         return await self.llm_provider.stream_generate(
             _INTEGRATE_SYSTEM_PROMPT,
             prompt,
@@ -708,7 +727,7 @@ class ReaderAgent:
 
     async def _summarize_for_context(self, agent_name: str, content: str, run_id: str | None = None) -> str:
         """긴 결과물을 다음 Agent에 전달할 수 있도록 CLI 호출로 요약."""
-        model_to_use = self.session_model or settings.team_model
+        model_to_use = self.session_model or self.session_model or ""
         return await self.llm_provider.stream_generate(
             _SUMMARIZE_SYSTEM_PROMPT,
             f"다음은 {agent_name}의 작업 결과입니다. 요약해주세요:\n\n{content}",
@@ -719,7 +738,7 @@ class ReaderAgent:
 
     async def _summarize_history(self, history_text: str, run_id: str | None = None) -> str:
         """긴 대화 이력을 요약하여 핵심 맥락만 추출."""
-        model_to_use = self.session_model or settings.team_model
+        model_to_use = self.session_model or self.session_model or ""
         return await self.llm_provider.stream_generate(
             _SUMMARIZE_HISTORY_SYSTEM_PROMPT,
             f"다음 대화 이력을 요약해주세요:\n\n{history_text}",

@@ -49,21 +49,35 @@ class StreamManager:
         return queue
 
     async def unsubscribe(self, run_id: str, queue: asyncio.Queue):
-        """구독 취소. 구독자가 0명이 되면 캐시 정리."""
+        """구독 취소.
+
+        - terminal 상태(done/error/cancelled)인 경우: 캐시 즉시 정리
+        - 아직 진행 중인 경우: 캐시 유지 (재연결 시 이벤트 재전송 지원)
+          캐시는 run이 terminal 상태에 도달하면 _schedule_cache_cleanup이 정리함.
+        """
         async with self.lock:
             if run_id in self.queues:
                 if queue in self.queues[run_id]:
                     self.queues[run_id].remove(queue)
                 if not self.queues[run_id]:
                     del self.queues[run_id]
-                    # 구독자가 모두 떠나면 캐시 정리
-                    self.last_status.pop(run_id, None)
-                    self.agent_created.pop(run_id, None)
-                    self.last_solo_content.pop(run_id, None)
-                    # content 캐시 중 해당 run_id 항목 정리
-                    keys_to_del = [k for k in self.last_content if k.startswith(f"{run_id}:")]
-                    for k in keys_to_del:
-                        del self.last_content[k]
+                    # terminal 상태 여부 확인
+                    last_status_json = self.last_status.get(run_id, "")
+                    is_terminal = False
+                    if last_status_json:
+                        try:
+                            is_terminal = json.loads(last_status_json).get("status") in self._TERMINAL_STATUSES
+                        except Exception:
+                            pass
+                    if is_terminal:
+                        # terminal: 즉시 캐시 정리
+                        self.last_status.pop(run_id, None)
+                        self.agent_created.pop(run_id, None)
+                        self.last_solo_content.pop(run_id, None)
+                        keys_to_del = [k for k in self.last_content if k.startswith(f"{run_id}:")]
+                        for k in keys_to_del:
+                            del self.last_content[k]
+                    # else: 진행 중 → 캐시 유지, _schedule_cache_cleanup이 나중에 정리
         logger.debug("Unsubscribed from stream: run_id=%s, queue_id=%s", run_id, id(queue))
 
     _TERMINAL_STATUSES = {"done", "error", "cancelled"}
