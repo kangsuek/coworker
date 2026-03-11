@@ -45,12 +45,22 @@ def _call_gemini_sync(
     )
     file_paths: list[str] = kwargs.get("file_paths") or []
 
+    # 파일 경로를 프롬프트에 포함 (Gemini CLI는 --image 플래그 미지원)
+    # Gemini CLI는 에이전트로서 자체 파일 읽기 도구로 해당 경로를 분석함
+    prompt_with_files = combined_prompt
+    if file_paths:
+        file_refs = "\n".join(f"- {fp}" for fp in file_paths)
+        prompt_with_files += f"\n\n[ATTACHED FILES - Please read and analyze these files]\n{file_refs}\n[END ATTACHED FILES]"
+
     gemini_path = settings_service.get("gemini_cli_path") or settings.gemini_cli_path
-    cmd = [gemini_path, "-p", combined_prompt]
+    cmd = [gemini_path, "-p", prompt_with_files]
     if model:
         cmd.extend(["--model", model])
-    for fp in file_paths:
-        cmd.extend(["--image", fp])
+    # 파일이 있는 디렉토리를 워크스페이스에 추가 (cwd=/tmp이므로 업로드 폴더 접근 불가 문제 해결)
+    if file_paths:
+        dirs = {os.path.dirname(os.path.abspath(fp)) for fp in file_paths}
+        for d in sorted(dirs):
+            cmd.extend(["--include-directories", d])
     cmd.extend(["--output-format", "stream-json"])
 
     logger.debug("Gemini CLI 시작: run_id=%s, model=%s", run_id, model)

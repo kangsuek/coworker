@@ -5,6 +5,7 @@ CLI-02a: Claude CLI _call_claude_sync → --file 플래그
 CLI-02b: Gemini CLI _call_gemini_sync → --image 플래그
 """
 
+import os
 import subprocess
 from unittest.mock import AsyncMock, MagicMock, call, patch
 
@@ -67,9 +68,14 @@ def test_gemini_provider_stream_generate_accepts_file_paths():
 # ───────────────────────────────────────────────
 
 
-def test_claude_cli_adds_file_flag_for_each_path(mock_proc_factory):
-    """file_paths 전달 시 cmd에 --file 플래그가 파일 수만큼 추가되어야 한다."""
+def test_claude_cli_copies_files_to_tmp_and_includes_in_prompt(mock_proc_factory, tmp_path):
+    """file_paths 전달 시 /tmp에 복사 후 복사된 경로가 프롬프트에 포함되어야 한다."""
+    import shutil
     from app.services.cli_service import _call_claude_sync
+
+    # 실제 파일 생성
+    src = tmp_path / "photo.jpg"
+    src.write_bytes(b"fake-image")
 
     mock_proc = mock_proc_factory(stdout_lines=[], returncode=0)
     captured_cmds: list[list[str]] = []
@@ -83,21 +89,20 @@ def test_claude_cli_adds_file_flag_for_each_path(mock_proc_factory):
             system_prompt="system",
             user_message="hello",
             output_json=True,
-            file_paths=["/tmp/photo.jpg", "/tmp/chart.png"],
+            file_paths=[str(src)],
         )
 
-    assert len(captured_cmds) == 1
     cmd = captured_cmds[0]
-    assert "--file" in cmd
-    # 두 파일 모두 전달
-    file_indices = [i for i, v in enumerate(cmd) if v == "--file"]
-    assert len(file_indices) == 2
-    assert cmd[file_indices[0] + 1] == "/tmp/photo.jpg"
-    assert cmd[file_indices[1] + 1] == "/tmp/chart.png"
+    assert "--file" not in cmd
+    p_idx = cmd.index("-p")
+    prompt_text = cmd[p_idx + 1]
+    # 원본 경로 대신 /tmp 아래 복사된 경로가 포함되어야 함
+    assert "photo.jpg" in prompt_text
+    assert prompt_text.find("/tmp/") != -1 or "coworker_" in prompt_text
 
 
-def test_claude_cli_no_file_flag_when_empty(mock_proc_factory):
-    """file_paths=[] 또는 미전달 시 --file 플래그가 없어야 한다."""
+def test_claude_cli_no_file_ref_when_empty(mock_proc_factory):
+    """file_paths=[] 시 프롬프트에 ATTACHED FILES 섹션이 없어야 한다."""
     from app.services.cli_service import _call_claude_sync
 
     mock_proc = mock_proc_factory(stdout_lines=[], returncode=0)
@@ -115,11 +120,13 @@ def test_claude_cli_no_file_flag_when_empty(mock_proc_factory):
             file_paths=[],
         )
 
-    assert "--file" not in captured_cmds[0]
+    cmd = captured_cmds[0]
+    p_idx = cmd.index("-p")
+    assert "ATTACHED FILES" not in cmd[p_idx + 1]
 
 
-def test_claude_cli_no_file_flag_when_not_provided(mock_proc_factory):
-    """file_paths 미전달 시 --file 플래그가 없어야 한다."""
+def test_claude_cli_no_file_ref_when_not_provided(mock_proc_factory):
+    """file_paths 미전달 시 프롬프트에 ATTACHED FILES 섹션이 없어야 한다."""
     from app.services.cli_service import _call_claude_sync
 
     mock_proc = mock_proc_factory(stdout_lines=[], returncode=0)
@@ -134,39 +141,19 @@ def test_claude_cli_no_file_flag_when_not_provided(mock_proc_factory):
             system_prompt="system",
             user_message="hello",
             output_json=True,
-        )
-
-    assert "--file" not in captured_cmds[0]
-
-
-def test_claude_cli_file_flags_appear_before_output_format(mock_proc_factory):
-    """--file 플래그는 --output-format 이전에 위치해야 한다 (CLI 파싱 순서)."""
-    from app.services.cli_service import _call_claude_sync
-
-    mock_proc = mock_proc_factory(stdout_lines=[], returncode=0)
-    captured_cmds: list[list[str]] = []
-
-    def fake_popen(cmd, **kwargs):
-        captured_cmds.append(cmd)
-        return mock_proc
-
-    with patch("subprocess.Popen", side_effect=fake_popen):
-        _call_claude_sync(
-            system_prompt="system",
-            user_message="hello",
-            output_json=True,
-            file_paths=["/tmp/img.jpg"],
         )
 
     cmd = captured_cmds[0]
-    file_idx = cmd.index("--file")
-    output_idx = cmd.index("--output-format")
-    assert file_idx < output_idx
+    p_idx = cmd.index("-p")
+    assert "ATTACHED FILES" not in cmd[p_idx + 1]
 
 
-def test_claude_cli_single_file(mock_proc_factory):
-    """단일 파일 전달 시 --file 1개만 추가."""
+def test_claude_cli_no_file_flag_always(mock_proc_factory, tmp_path):
+    """파일 첨부 여부에 관계없이 --file 플래그는 절대 사용하지 않아야 한다."""
     from app.services.cli_service import _call_claude_sync
+
+    src = tmp_path / "img.jpg"
+    src.write_bytes(b"x")
 
     mock_proc = mock_proc_factory(stdout_lines=[], returncode=0)
     captured_cmds: list[list[str]] = []
@@ -180,21 +167,57 @@ def test_claude_cli_single_file(mock_proc_factory):
             system_prompt="system",
             user_message="hello",
             output_json=True,
-            file_paths=["/tmp/report.pdf"],
+            file_paths=[str(src)],
         )
 
-    cmd = captured_cmds[0]
-    assert cmd.count("--file") == 1
-    assert "/tmp/report.pdf" in cmd
+    assert "--file" not in captured_cmds[0]
+
+
+def test_claude_cli_tmp_dir_cleaned_up_after_call(mock_proc_factory, tmp_path):
+    """CLI 호출 완료 후 /tmp 임시 디렉토리가 삭제되어야 한다."""
+    from app.services.cli_service import _call_claude_sync
+
+    src = tmp_path / "report.pdf"
+    src.write_bytes(b"pdf-content")
+
+    mock_proc = mock_proc_factory(stdout_lines=[], returncode=0)
+    created_tmp_dirs: list[str] = []
+
+    original_popen = subprocess.Popen
+
+    def fake_popen(cmd, **kwargs):
+        # -p 다음 프롬프트에서 /tmp/coworker_ 경로 추출
+        p_idx = cmd.index("-p")
+        prompt = cmd[p_idx + 1]
+        for part in prompt.split("\n"):
+            part = part.strip("- ").strip()
+            if "/tmp/coworker_" in part:
+                d = os.path.dirname(part)
+                if d not in created_tmp_dirs:
+                    created_tmp_dirs.append(d)
+        return mock_proc
+
+    with patch("subprocess.Popen", side_effect=fake_popen):
+        _call_claude_sync(
+            system_prompt="system",
+            user_message="analyze",
+            output_json=True,
+            file_paths=[str(src)],
+        )
+
+    # 임시 디렉토리가 정리되었는지 확인
+    for d in created_tmp_dirs:
+        assert not os.path.exists(d), f"임시 디렉토리가 남아있음: {d}"
 
 
 # ───────────────────────────────────────────────
-# CLI-02b: Gemini CLI --image 플래그
+# CLI-02b: Gemini CLI 파일 경로 프롬프트 포함 방식
+# (Gemini CLI는 --image 플래그 미지원 → 프롬프트에 파일 경로 삽입)
 # ───────────────────────────────────────────────
 
 
-def test_gemini_cli_adds_image_flag_for_each_path(mock_proc_factory):
-    """file_paths 전달 시 cmd에 --image 플래그가 파일 수만큼 추가되어야 한다."""
+def test_gemini_cli_includes_file_paths_in_prompt(mock_proc_factory):
+    """file_paths 전달 시 프롬프트(-p 인수)에 파일 경로가 포함되어야 한다."""
     from app.services.llm.gemini_cli import _call_gemini_sync
 
     mock_proc = mock_proc_factory(stdout_lines=[], returncode=0)
@@ -212,15 +235,17 @@ def test_gemini_cli_adds_image_flag_for_each_path(mock_proc_factory):
         )
 
     cmd = captured_cmds[0]
-    assert "--image" in cmd
-    image_indices = [i for i, v in enumerate(cmd) if v == "--image"]
-    assert len(image_indices) == 2
-    assert cmd[image_indices[0] + 1] == "/tmp/photo.jpg"
-    assert cmd[image_indices[1] + 1] == "/tmp/chart.png"
+    # --image 플래그 없어야 함
+    assert "--image" not in cmd
+    # -p 다음 프롬프트 문자열에 파일 경로 포함 여부 확인
+    p_idx = cmd.index("-p")
+    prompt_text = cmd[p_idx + 1]
+    assert "/tmp/photo.jpg" in prompt_text
+    assert "/tmp/chart.png" in prompt_text
 
 
-def test_gemini_cli_no_image_flag_when_empty(mock_proc_factory):
-    """file_paths=[] 시 --image 플래그가 없어야 한다."""
+def test_gemini_cli_no_file_ref_when_empty(mock_proc_factory):
+    """file_paths=[] 시 프롬프트에 ATTACHED FILES 섹션이 없어야 한다."""
     from app.services.llm.gemini_cli import _call_gemini_sync
 
     mock_proc = mock_proc_factory(stdout_lines=[], returncode=0)
@@ -237,11 +262,14 @@ def test_gemini_cli_no_image_flag_when_empty(mock_proc_factory):
             file_paths=[],
         )
 
-    assert "--image" not in captured_cmds[0]
+    cmd = captured_cmds[0]
+    p_idx = cmd.index("-p")
+    prompt_text = cmd[p_idx + 1]
+    assert "ATTACHED FILES" not in prompt_text
 
 
-def test_gemini_cli_no_image_flag_when_not_provided(mock_proc_factory):
-    """file_paths 미전달 시 --image 플래그가 없어야 한다."""
+def test_gemini_cli_no_file_ref_when_not_provided(mock_proc_factory):
+    """file_paths 미전달 시 프롬프트에 ATTACHED FILES 섹션이 없어야 한다."""
     from app.services.llm.gemini_cli import _call_gemini_sync
 
     mock_proc = mock_proc_factory(stdout_lines=[], returncode=0)
@@ -257,11 +285,14 @@ def test_gemini_cli_no_image_flag_when_not_provided(mock_proc_factory):
             user_message="hello",
         )
 
-    assert "--image" not in captured_cmds[0]
+    cmd = captured_cmds[0]
+    p_idx = cmd.index("-p")
+    prompt_text = cmd[p_idx + 1]
+    assert "ATTACHED FILES" not in prompt_text
 
 
-def test_gemini_cli_single_image(mock_proc_factory):
-    """단일 이미지 전달 시 --image 1개만 추가."""
+def test_gemini_cli_single_file_in_prompt(mock_proc_factory):
+    """단일 파일 전달 시 프롬프트에 해당 경로가 포함되어야 한다."""
     from app.services.llm.gemini_cli import _call_gemini_sync
 
     mock_proc = mock_proc_factory(stdout_lines=[], returncode=0)
@@ -279,12 +310,13 @@ def test_gemini_cli_single_image(mock_proc_factory):
         )
 
     cmd = captured_cmds[0]
-    assert cmd.count("--image") == 1
-    assert "/tmp/diagram.png" in cmd
+    assert "--image" not in cmd
+    p_idx = cmd.index("-p")
+    assert "/tmp/diagram.png" in cmd[p_idx + 1]
 
 
-def test_gemini_cli_image_flags_position(mock_proc_factory):
-    """--image 플래그는 --output-format 이전에 위치해야 한다."""
+def test_gemini_cli_no_image_flag_always(mock_proc_factory):
+    """파일 첨부 여부에 관계없이 --image 플래그는 절대 사용하지 않아야 한다."""
     from app.services.llm.gemini_cli import _call_gemini_sync
 
     mock_proc = mock_proc_factory(stdout_lines=[], returncode=0)
@@ -301,10 +333,73 @@ def test_gemini_cli_image_flags_position(mock_proc_factory):
             file_paths=["/tmp/img.webp"],
         )
 
+    assert "--image" not in captured_cmds[0]
+
+
+def test_gemini_cli_adds_include_directories_for_file_paths(mock_proc_factory):
+    """file_paths 전달 시 --include-directories 플래그로 해당 폴더가 추가되어야 한다."""
+    from app.services.llm.gemini_cli import _call_gemini_sync
+
+    mock_proc = mock_proc_factory(stdout_lines=[], returncode=0)
+    captured_cmds: list[list[str]] = []
+
+    def fake_popen(cmd, **kwargs):
+        captured_cmds.append(cmd)
+        return mock_proc
+
+    with patch("subprocess.Popen", side_effect=fake_popen):
+        _call_gemini_sync(
+            system_prompt="system",
+            user_message="describe",
+            file_paths=["/tmp/photo.jpg", "/tmp/chart.png"],
+        )
+
     cmd = captured_cmds[0]
-    image_idx = cmd.index("--image")
-    output_idx = cmd.index("--output-format")
-    assert image_idx < output_idx
+    assert "--include-directories" in cmd
+    inc_idx = cmd.index("--include-directories")
+    assert cmd[inc_idx + 1] == "/tmp"
+
+
+def test_gemini_cli_no_include_directories_when_no_files(mock_proc_factory):
+    """file_paths 없을 때 --include-directories 플래그가 없어야 한다."""
+    from app.services.llm.gemini_cli import _call_gemini_sync
+
+    mock_proc = mock_proc_factory(stdout_lines=[], returncode=0)
+    captured_cmds: list[list[str]] = []
+
+    def fake_popen(cmd, **kwargs):
+        captured_cmds.append(cmd)
+        return mock_proc
+
+    with patch("subprocess.Popen", side_effect=fake_popen):
+        _call_gemini_sync(
+            system_prompt="system",
+            user_message="hello",
+        )
+
+    assert "--include-directories" not in captured_cmds[0]
+
+
+def test_gemini_cli_deduplicates_include_directories(mock_proc_factory):
+    """같은 폴더의 파일이 여럿이면 --include-directories는 중복 없이 1번만 추가되어야 한다."""
+    from app.services.llm.gemini_cli import _call_gemini_sync
+
+    mock_proc = mock_proc_factory(stdout_lines=[], returncode=0)
+    captured_cmds: list[list[str]] = []
+
+    def fake_popen(cmd, **kwargs):
+        captured_cmds.append(cmd)
+        return mock_proc
+
+    with patch("subprocess.Popen", side_effect=fake_popen):
+        _call_gemini_sync(
+            system_prompt="system",
+            user_message="describe",
+            file_paths=["/tmp/a.jpg", "/tmp/b.png", "/tmp/c.webp"],
+        )
+
+    cmd = captured_cmds[0]
+    assert cmd.count("--include-directories") == 1
 
 
 # ───────────────────────────────────────────────

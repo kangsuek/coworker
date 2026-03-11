@@ -14,8 +14,10 @@ import json
 import logging
 import os
 import queue
+import shutil
 import signal
 import subprocess
+import tempfile
 import threading
 from collections.abc import Callable, Coroutine
 from typing import Any
@@ -58,12 +60,27 @@ def _call_claude_sync(
 
     file_paths: list[str] = kwargs.get("file_paths") or []
 
+    # Claude CLI는 cwd="/tmp" 워크스페이스 외부 파일에 접근 불가.
+    # 업로드 파일을 /tmp에 복사하여 워크스페이스 안으로 이동시킨 뒤 프롬프트에 경로 포함.
+    # (--file 옵션은 Files API file_id 전용이므로 로컬 경로에 사용 불가)
+    tmp_dir: str | None = None
+    tmp_file_paths: list[str] = []
+    if file_paths:
+        tmp_dir = tempfile.mkdtemp(prefix="coworker_", dir="/tmp")
+        for fp in file_paths:
+            dst = os.path.join(tmp_dir, os.path.basename(fp))
+            shutil.copy2(fp, dst)
+            tmp_file_paths.append(dst)
+
+    message_with_files = user_message
+    if tmp_file_paths:
+        file_refs = "\n".join(f"- {fp}" for fp in tmp_file_paths)
+        message_with_files += f"\n\n[ATTACHED FILES - Please read and analyze these files]\n{file_refs}\n[END ATTACHED FILES]"
+
     cli_path = settings_service.get("claude_cli_path") or settings.claude_cli_path
-    cmd = [cli_path, "-p", user_message, "--system-prompt", system_prompt]
+    cmd = [cli_path, "-p", message_with_files, "--system-prompt", system_prompt]
     if model:
         cmd.extend(["--model", model])
-    for fp in file_paths:
-        cmd.extend(["--file", fp])
     if output_json:
         cmd.extend(["--output-format", "json"])
     else:
@@ -185,6 +202,9 @@ def _call_claude_sync(
                 procs.remove(proc)
             if not procs and proc_key in _active_procs:
                 del _active_procs[proc_key]
+        # /tmp 임시 디렉토리 정리
+        if tmp_dir and os.path.exists(tmp_dir):
+            shutil.rmtree(tmp_dir, ignore_errors=True)
 
     # 취소로 인한 종료인 경우 예외 발생
     if run_id and run_id in _cancelled_runs:
