@@ -28,7 +28,16 @@ export function useSession(): UseSessionResult {
   })
 
   useEffect(() => {
-    api.getSessions().then(setSessions).catch(() => {})
+    api.getSessions().then((list) => {
+      setSessions(list)
+      // 초기 로드 시 가장 최근 세션을 자동 선택 (새로고침 후 currentSession=null 방지)
+      if (list.length > 0) {
+        api.getSession(list[0].id).then((detail) => {
+          setCurrentSession(detail)
+          setMessages(detail.messages)
+        }).catch(() => {})
+      }
+    }).catch(() => {})
   }, [])
 
   const switchSession = useCallback(async (id: string) => {

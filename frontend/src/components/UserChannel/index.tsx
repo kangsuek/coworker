@@ -111,7 +111,7 @@ export default function UserChannel({
         llm_model: llmModel || null,
         file_ids: file_ids.length > 0 ? file_ids : undefined,
       })
-      if (!currentSession) {
+      if (!currentSession || resp.session_id !== currentSession.id) {
         onSessionCreated(resp.session_id)
       }
       onRunChange(resp.run_id)
